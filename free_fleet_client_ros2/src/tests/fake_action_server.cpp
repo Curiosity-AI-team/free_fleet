@@ -28,20 +28,15 @@ using GoalHandleNavigateToPose = rclcpp_action::ServerGoalHandle<NavigateToPose>
 
 rclcpp_action::Server<NavigateToPose>::SharedPtr action_server_;
 
-rclcpp_action::GoalResponse handle_goal(
-  const rclcpp_action::GoalUUID & uuid,
-  std::shared_ptr<const NavigateToPose::Goal> goal)
+rclcpp_action::GoalResponse handle_goal(const rclcpp_action::GoalUUID & uuid, std::shared_ptr<const NavigateToPose::Goal> goal)
 {
   RCLCPP_INFO(
-    rclcpp::get_logger(
-      "handle_goal_fn"), "Received goal request with frame_id %s",
-    goal->pose.header.frame_id.c_str());
+    rclcpp::get_logger("handle_goal_fn"), "Received goal request with frame_id %s",goal->pose.header.frame_id.c_str());
   (void)uuid;
   return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
 }
 
-rclcpp_action::CancelResponse handle_cancel(
-  const std::shared_ptr<GoalHandleNavigateToPose> goal_handle)
+rclcpp_action::CancelResponse handle_cancel(const std::shared_ptr<GoalHandleNavigateToPose> goal_handle)
 {
   RCLCPP_INFO(rclcpp::get_logger("handle_cancel_fn"), "Received request to cancel goal");
   (void)goal_handle;
@@ -50,9 +45,7 @@ rclcpp_action::CancelResponse handle_cancel(
 
 void execute(const std::shared_ptr<GoalHandleNavigateToPose> goal_handle)
 {
-  RCLCPP_INFO(
-    rclcpp::get_logger(
-      "execute_fn"), "executing goal: send feedback for 5s to simulate work");
+  RCLCPP_INFO(rclcpp::get_logger("execute_fn"), "executing goal: send feedback for 5s to simulate work");
   auto clock = rclcpp::Clock(RCL_STEADY_TIME);
   auto start = clock.now();
   // do lots of awesome groundbreaking robot stuff here
@@ -97,8 +90,7 @@ int main(int argc, char ** argv)
 
   auto node = std::make_shared<rclcpp::Node>("fake_nav2_action_server");
   using namespace std::placeholders;  // for _1, _2, _3...
-  auto action_server = rclcpp_action::create_server<NavigateToPose>(
-    node, "navigate_to_pose_fake",
+  auto action_server = rclcpp_action::create_server<NavigateToPose>(node, "navigate_to_pose",
     std::bind(handle_goal, _1, _2),
     std::bind(handle_cancel, _1),
     std::bind(handle_accepted, _1));

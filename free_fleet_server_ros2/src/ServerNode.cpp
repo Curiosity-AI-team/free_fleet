@@ -84,11 +84,14 @@ ServerNode::~ServerNode()
 {}
 
 ServerNode::ServerNode(
-    const ServerNodeConfig& _config,
+    const ServerNodeConfig&  _config,
     const rclcpp::NodeOptions& _node_options) :
   Node(_config.fleet_name + "_node", _node_options),
   server_node_config(_config)
-{}
+{
+  task_dispatcher_client_ = create_client<rmf_task_msgs::srv::SubmitTask>(
+      "/hamal_task_dispatcher/task_info");
+}
 
 void ServerNode::print_config()
 {
@@ -164,7 +167,9 @@ void ServerNode::start(Fields _fields)
   fleet_state_pub =
       create_publisher<rmf_fleet_msgs::msg::FleetState>(
           server_node_config.fleet_state_topic, 10);
-
+  
+  robot_state_pub = this->create_publisher<rmf_fleet_msgs::msg::RobotState>("/robot_state", 10);
+  
   fleet_state_pub_timer = create_wall_timer(
       std::chrono::seconds(1) / server_node_config.publish_state_frequency,
       std::bind(&ServerNode::publish_fleet_state, this),
@@ -215,6 +220,38 @@ void ServerNode::start(Fields _fields)
             handle_destination_request(std::move(msg));
           },
           destination_request_sub_opt);
+
+  // --------------------------------------------------------------------------
+  // Dispenser reqeust handling
+
+  auto dispenser_request_sub_opt = rclcpp::SubscriptionOptions();
+
+  dispenser_request_sub_opt.callback_group = fleet_state_pub_callback_group;
+
+  dispenser_request_sub = create_subscription<rmf_dispenser_msgs::msg::DispenserRequest>(
+      "/dispenser_requests", rclcpp::QoS(10),
+      [&](rmf_dispenser_msgs::msg::DispenserRequest::UniquePtr msg)
+      {
+        handle_dispenser_request(std::move(msg));
+      },
+      dispenser_request_sub_opt);
+
+  // --------------------------------------------------------------------------
+  // Ingestor reqeust handling
+
+  auto ingestor_request_sub_opt = rclcpp::SubscriptionOptions();
+
+  ingestor_request_sub_opt.callback_group = fleet_state_pub_callback_group;
+
+  ingestor_request_sub =
+      create_subscription<rmf_ingestor_msgs::msg::IngestorRequest>(
+          "/ingestor_requests", rclcpp::QoS(10),
+          [&](rmf_ingestor_msgs::msg::IngestorRequest::UniquePtr msg)
+          {
+            handle_ingestor_request(std::move(msg));
+          },
+          ingestor_request_sub_opt);
+
 }
 
 bool ServerNode::is_request_valid(
@@ -311,6 +348,7 @@ void ServerNode::handle_mode_request(
 {
   messages::ModeRequest ff_msg;
   to_ff_message(*(_msg.get()), ff_msg);
+    // to_ff_message(*(_msg.get()), ff_msg, task_dispatcher_client_);
   fields.server->send_mode_request(ff_msg);
 }
 
@@ -339,6 +377,18 @@ void ServerNode::handle_destination_request(
   messages::DestinationRequest ff_msg;
   to_ff_message(*(_msg.get()), ff_msg);
   fields.server->send_destination_request(ff_msg);
+}
+
+void ServerNode::handle_dispenser_request(
+  rmf_dispenser_msgs::msg::DispenserRequest::UniquePtr _msg)
+{
+  
+}
+
+void ServerNode::handle_ingestor_request(
+  rmf_ingestor_msgs::msg::IngestorRequest::UniquePtr _msg)
+{
+
 }
 
 void ServerNode::update_state_callback()
@@ -403,9 +453,14 @@ void ServerNode::publish_fleet_state()
       rmf_frame_rs.path.push_back(rmf_frame_path_loc);
     }
 
+    // Add to fleet state
     fleet_state.robots.push_back(rmf_frame_rs);
+
+    // Publish individual robot state to /robot_states
+    robot_state_pub->publish(rmf_frame_rs);
   }
-  fleet_state_pub->publish(fleet_state);
+  
+//   fleet_state_pub->publish(fleet_state); // why we need to publish fleet_state??? TPODAvia
 }
 
 } // namespace ros2
