@@ -276,7 +276,8 @@ void ClientNode::publish_robot_state()
       current_robot_pose.pose.position.x;
     new_robot_state.location.y =
       current_robot_pose.pose.position.y;
-    new_robot_state.location.yaw = get_yaw_from_pose(current_robot_pose);
+    new_robot_state.location.yaw = get_yaw_from_pose(current_robot_pose); // Doesnt make any sense @TPODAvia
+        // new_robot_state.location.yaw = 0.0;
     new_robot_state.location.level_name = client_node_config.level_name;
   }
 
@@ -330,6 +331,7 @@ nav2_msgs::action::NavigateToPose::Goal ClientNode::location_to_nav_goal(
   goal.pose.pose.position.x = _location.x;
   goal.pose.pose.position.y = _location.y;
   goal.pose.pose.position.z = 0.0; // TODO: handle Z height with level
+  RCLCPP_INFO(get_logger(), "received a _location.yaw. %f", _location.yaw);
   goal.pose.pose.orientation = get_quat_from_yaw(_location.yaw);
   return goal;
 }
@@ -454,34 +456,48 @@ bool ClientNode::read_path_request()
     // remaining wait logic. We are currently relying on the task to be updated
     // to indicate that the client does not need to wait anymore.
     {
-      WriteLock task_id_lock(task_id_mutex);
-      current_task_id = path_request.task_id;
+        WriteLock task_id_lock(task_id_mutex);
+        current_task_id = path_request.task_id;
     }
     {
-      WriteLock goal_path_lock(goal_path_mutex);
-      goal_path.clear();
-      for (size_t i = 0; i < path_request.path.size(); ++i)
-      {
+        WriteLock goal_path_lock(goal_path_mutex);
+        goal_path.clear();
+        for (size_t i = 0; i < path_request.path.size(); ++i)
+        {
+            // Set sec and nanosec to zero if timing is not important
+            path_request.path[i].sec = 0;
+            path_request.path[i].nanosec = 0;
 
-        // Set sec and nanosec to zero if timing is not important
-        path_request.path[i].sec = 0;
-        path_request.path[i].nanosec = 0;
+            // Calculate yaw if not the last point
+            if (i < path_request.path.size() - 1)
+            {
+            double dx = path_request.path[i + 1].x - path_request.path[i].x;
+            double dy = path_request.path[i + 1].y - path_request.path[i].y;
+            path_request.path[i].yaw = atan2(dy, dx); // Calculate yaw angle
+            }
+            else
+            {
+            // For the last point, use the yaw of the previous point
+            if (path_request.path.size() > 1)
+                path_request.path[i].yaw = path_request.path[i - 1].yaw;
+            else
+                path_request.path[i].yaw = 0.0; // Default yaw if only one point exists
+            }
 
-        RCLCPP_INFO(get_logger(), "sec: %u", path_request.path[i].sec);
-        goal_path.push_back(
-            Goal {
-                path_request.path[i].level_name,
-                location_to_nav_goal(path_request.path[i]),
-                false,
-                0,
-                // rclcpp::Time(
-                //     path_request.path[i].sec,
-                //     path_request.path[i].nanosec,
-                //     RCL_ROS_TIME)}); // messages use RCL_ROS_TIME instead of default RCL_SYSTEM_TIME
-                this->now()
-                }
-        );
-      }
+            // Debug logs
+            RCLCPP_INFO(get_logger(), "size: %lu", path_request.path.size());
+            RCLCPP_INFO(get_logger(), "sec: %u, yaw: %.2f", path_request.path[i].sec, path_request.path[i].yaw);
+
+            // Add the waypoint to the goal path
+            goal_path.push_back(
+                Goal {
+                    path_request.path[i].level_name,
+                    location_to_nav_goal(path_request.path[i]),
+                    false,
+                    0,
+                    this->now()
+                });
+        }
     }
 
     if (paused)
