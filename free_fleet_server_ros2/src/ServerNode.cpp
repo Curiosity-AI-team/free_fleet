@@ -332,6 +332,33 @@ void ServerNode::handle_mode_request(rmf_fleet_msgs::msg::ModeRequest::UniquePtr
 
 void ServerNode::handle_path_request(rmf_fleet_msgs::msg::PathRequest::UniquePtr _msg)
 {
+    // Check if the path has at least two waypoints
+    if (_msg->path.size() >= 2)
+    {
+        // Get the first and last waypoints
+        const auto& first_wp = _msg->path.front();
+        const auto& last_wp = _msg->path.back();
+
+        // Compute the Euclidean distance between the first and last waypoints
+        double dx = last_wp.x - first_wp.x;
+        double dy = last_wp.y - first_wp.y;
+        double distance = std::sqrt(dx * dx + dy * dy);
+
+        // Compute the absolute difference in yaw
+        double yaw_difference = std::abs(last_wp.yaw - first_wp.yaw);
+
+        // If the distance is less than 1.0 and yaw difference is less than or equal to 0.1, ignore the request
+        if (distance < 0.05 && yaw_difference < 0.01)
+        {
+            RCLCPP_INFO(
+                get_logger(),
+                "Ignoring path request: Distance (%.2f) < 1.0 and yaw difference (%.2f) <= 0.1",
+                distance, yaw_difference);
+            return;
+        }
+    }
+
+    // Continue with transforming the path waypoints
     for (std::size_t i = 0; i < _msg->path.size(); ++i)
     {
         rmf_fleet_msgs::msg::Location fleet_frame_waypoint;

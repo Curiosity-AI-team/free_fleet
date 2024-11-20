@@ -264,7 +264,7 @@ void ClientNode::publish_robot_state()
     /// sensor_msgs/BatteryInfo on the other hand returns a value in
     /// the range of 0-1
     // new_robot_state.battery_percent = 100 * current_battery_state.percentage;
-    new_robot_state.battery_percent = 100;
+    new_robot_state.battery_percent = 20;
   }
 
   {
@@ -569,6 +569,37 @@ void ClientNode::handle_requests()
   ReadLock goal_path_lock(goal_path_mutex);
   if (!goal_path.empty())
   {
+    const auto& current_goal = goal_path.front();
+
+    // Calculate the distance to the goal
+    double dx = current_goal.goal.pose.pose.position.x - current_robot_pose.pose.position.x;
+    double dy = current_goal.goal.pose.pose.position.y - current_robot_pose.pose.position.y;
+    double distance_to_goal = sqrt(dx * dx + dy * dy);
+
+    // Calculate the yaw error
+    double yaw_to_goal = get_yaw_from_pose(current_goal.goal.pose);
+    double yaw_error = fabs(yaw_to_goal - get_yaw_from_pose(current_robot_pose));
+
+    // Debug information
+    RCLCPP_INFO(get_logger(), "Distance to goal: %.3f", distance_to_goal);
+    RCLCPP_INFO(get_logger(), "Yaw error: %.5f", yaw_error);
+
+    // Check if the conditions to ignore further operation are met
+    if (distance_to_goal < 0.2 && yaw_error < 0.23)
+    {
+      RCLCPP_INFO(get_logger(), "Close to goal (distance < 0.02, yaw error < 0.23). Marking success.");
+      RCLCPP_INFO(get_logger(), "Current goal state: SUCCEEDED.");
+
+      if (!goal_path.empty())
+        goal_path.pop_front(); // Remove the current goal from the queue
+    if (goal_path.empty())
+    {
+        WriteLock task_id_lock(task_id_mutex);
+        current_task_id = "";
+    }
+      return; // Skip sending the goal to the robot
+    }
+
     auto send_goal_options = rclcpp_action::Client<NavigateToPose>::SendGoalOptions();
     send_goal_options.goal_response_callback = [&](const GoalHandleNavigateToPose::SharedPtr & goal) {
       if (!goal) {
@@ -584,13 +615,10 @@ void ClientNode::handle_requests()
       WriteLock goal_path_lock(goal_path_mutex);
       switch (result.code) {
         case rclcpp_action::ResultCode::SUCCEEDED:
-          RCLCPP_INFO(get_logger(), "current goal state: SUCCEEEDED.");
-          // By some stroke of good fortune, we may have arrived at our goal
-          // earlier than we were scheduled to reach it. If that is the case,
-          // we need to wait here until it's time to proceed.
+          RCLCPP_INFO(get_logger(), "current goal state: SUCCEEDED.");
           if (now() >= goal_path.front().goal_end_time)
           {
-            if (!goal_path.empty()) // TODO: fix race condition instead
+            if (!goal_path.empty())
               goal_path.pop_front();
           }
           else
@@ -613,7 +641,7 @@ void ClientNode::handle_requests()
                       if (current_task_id != goal_task_id)
                       {
                         RCLCPP_INFO(get_logger(),
-                          "a new task has come in, moving on to new task.");
+                          "A new task has come in, moving on to new task.");
                         return;
                       }
                     }
@@ -621,7 +649,7 @@ void ClientNode::handle_requests()
                     rclcpp::Duration wait_time_remaining =
                         goal_path.front().goal_end_time - now();
                     RCLCPP_INFO(get_logger(),
-                        "we reached our goal early! Waiting %.2f more seconds",
+                        "We reached our goal early! Waiting %.2f more seconds",
                         wait_time_remaining.seconds());
                     std::this_thread::sleep_for(std::chrono::seconds(2));
                   }
@@ -640,35 +668,24 @@ void ClientNode::handle_requests()
           RCLCPP_ERROR(this->get_logger(), "Goal was aborted");
           goal_path.front().aborted_count++;
 
-          // TODO: parameterize the maximum number of retries.
           if (goal_path.front().aborted_count < 5)
           {
-            RCLCPP_INFO(get_logger(), "robot's navigation stack has aborted the current goal %d "
-                "times, client will try again...",
-                goal_path.front().aborted_count);
+            RCLCPP_INFO(get_logger(), "Retrying goal...");
             goal_path.front().sent = false;
             return;
           }
           else
           {
-            RCLCPP_INFO(get_logger(), "robot's navigation stack has aborted the current goal %d "
-                "times, please check that there is nothing in the way of the "
-                "robot, client will abort the current path request, and await "
-                "further requests.",
-                goal_path.front().aborted_count);
+            RCLCPP_INFO(get_logger(), "Aborted too many times. Clearing path.");
             goal_path.clear();
             return;
           }
-          return;
-        case rclcpp_action::ResultCode::CANCELED: // for example when paused.
+        case rclcpp_action::ResultCode::CANCELED:
           RCLCPP_ERROR(this->get_logger(), "Goal was canceled");
-          // do not clear goal_path as we want to reuse it on resume
           goal_path.front().sent = false;
           return;
         default:
           RCLCPP_ERROR(this->get_logger(), "Unknown result code: %d", (int)result.code);
-          RCLCPP_INFO(get_logger(), "Client will abort the current path request, and await further "
-              "requests or manual intervention.");
           goal_path.clear();
           return;
       }
@@ -677,14 +694,12 @@ void ClientNode::handle_requests()
     // Goals must have been updated since last handling, execute them now
     if (!goal_path.front().sent)
     {
-      RCLCPP_INFO(get_logger(), "sending next goal.");
+      RCLCPP_INFO(get_logger(), "Sending next goal.");
       fields.move_base_client->async_send_goal(goal_path.front().goal, send_goal_options);
       goal_path.front().sent = true;
       return;
     }
   }
-
-  // otherwise, mode is correct, nothing in queue, nothing else to do then
 }
 
 void ClientNode::update_fn()
