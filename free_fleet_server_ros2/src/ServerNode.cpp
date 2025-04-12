@@ -227,8 +227,7 @@ void ServerNode::start(Fields _fields)
 
     ingestor_request_sub_opt.callback_group = fleet_state_pub_callback_group;
 
-    ingestor_request_sub =
-        create_subscription<rmf_ingestor_msgs::msg::IngestorRequest>(
+    ingestor_request_sub = create_subscription<rmf_ingestor_msgs::msg::IngestorRequest>(
             "/ingestor_requests", rclcpp::QoS(10),
             [&](rmf_ingestor_msgs::msg::IngestorRequest::UniquePtr msg)
             {
@@ -236,6 +235,11 @@ void ServerNode::start(Fields _fields)
             },
             ingestor_request_sub_opt);
 
+    dispenser_result_pub = create_publisher<rmf_dispenser_msgs::msg::DispenserResult>(
+        "/dispenser_results", 10);
+
+    ingestor_result_pub = create_publisher<rmf_ingestor_msgs::msg::IngestorResult>(
+        "/ingestor_results", 10);
 }
 
 bool ServerNode::is_request_valid(const std::string& _fleet_name, const std::string& _robot_name)
@@ -348,14 +352,14 @@ void ServerNode::handle_path_request(rmf_fleet_msgs::msg::PathRequest::UniquePtr
         double yaw_difference = std::abs(last_wp.yaw - first_wp.yaw);
 
         // If the distance is less than 1.0 and yaw difference is less than or equal to 0.1, ignore the request
-        if (distance < 0.05 && yaw_difference < 0.01)
-        {
-            RCLCPP_INFO(
-                get_logger(),
-                "Ignoring path request: Distance (%.2f) < 1.0 and yaw difference (%.2f) <= 0.1",
-                distance, yaw_difference);
-            return;
-        }
+        // if (distance < 0.05 && yaw_difference < 0.01)
+        // {
+        //     RCLCPP_INFO(
+        //         get_logger(),
+        //         "Ignoring path request: Distance (%.2f) < 1.0 and yaw difference (%.2f) <= 0.1",
+        //         distance, yaw_difference);
+        //     return;
+        // }
     }
 
     // Continue with transforming the path waypoints
@@ -382,14 +386,106 @@ void ServerNode::handle_destination_request(rmf_fleet_msgs::msg::DestinationRequ
     fields.server->send_destination_request(ff_msg);
 }
 
-void ServerNode::handle_dispenser_request(rmf_dispenser_msgs::msg::DispenserRequest::UniquePtr _msg)
+void ServerNode::handle_dispenser_request(rmf_dispenser_msgs::msg::DispenserRequest::UniquePtr msg)
 {
-  
+    // 1) Print the incoming DispenserRequest
+    RCLCPP_INFO(
+        get_logger(),
+        "Received DispenserRequest:\n"
+        "  request_guid=%s\n"
+        "  target_guid=%s\n"
+        "  transporter_type=%s\n"
+        "  items.size()=%zu",
+        msg->request_guid.c_str(),
+        msg->target_guid.c_str(),
+        msg->transporter_type.c_str(),
+        msg->items.size());
+
+    // 2) Publish an ACKNOWLEDGED DispenserResult (status=0)
+    rmf_dispenser_msgs::msg::DispenserResult ack_msg;
+    ack_msg.time = now();                          // Current ROS time
+    ack_msg.request_guid = msg->request_guid;      // Must match the incoming guid
+    ack_msg.source_guid = msg->target_guid;        // E.g. the dispenser name
+    ack_msg.status = rmf_dispenser_msgs::msg::DispenserResult::ACKNOWLEDGED; // 0
+
+    dispenser_result_pub->publish(ack_msg);
+    RCLCPP_INFO(
+        get_logger(),
+        "Published ACKNOWLEDGED DispenserResult (status=0) for request [%s]",
+        ack_msg.request_guid.c_str());
+
+    // ----------------------------------------------------------------------
+    // In a real workflow, your robot or hardware might need time to do the
+    // pickup. For example, you could:
+    //
+    //   1. Command the robot to pick up an item
+    //   2. Wait for hardware confirmation
+    //   3. Then publish SUCCESS
+    //
+    // Here, we'll just do a small sleep to simulate "pickup time" so that
+    // you see two separate messages in the logs.
+
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(1s); // sleep 1 second
+
+    // 3) Publish a SUCCESS DispenserResult (status=1)
+    rmf_dispenser_msgs::msg::DispenserResult success_msg;
+    success_msg.time = now();
+    success_msg.request_guid = msg->request_guid;
+    success_msg.source_guid = msg->target_guid;
+    success_msg.status = rmf_dispenser_msgs::msg::DispenserResult::SUCCESS; // 1
+
+    dispenser_result_pub->publish(success_msg);
+    RCLCPP_INFO(
+        get_logger(),
+        "Published SUCCESS DispenserResult (status=1) for request [%s]",
+        success_msg.request_guid.c_str());
 }
 
-void ServerNode::handle_ingestor_request(rmf_ingestor_msgs::msg::IngestorRequest::UniquePtr _msg)
+void ServerNode::handle_ingestor_request(rmf_ingestor_msgs::msg::IngestorRequest::UniquePtr msg)
 {
+    // Log the contents of the received ingestor request
+    RCLCPP_INFO(
+        get_logger(),
+        "Received IngestorRequest:\n"
+        "  request_guid: %s\n"
+        "  target_guid: %s\n"
+        "  transporter_type: %s\n"
+        "  items.size(): %zu",
+        msg->request_guid.c_str(),
+        msg->target_guid.c_str(),
+        msg->transporter_type.c_str(),
+        msg->items.size());
 
+    // Publish an ACKNOWLEDGED IngestorResult (status = 0)
+    rmf_ingestor_msgs::msg::IngestorResult ack_msg;
+    ack_msg.time = now();                          // Current ROS time
+    ack_msg.request_guid = msg->request_guid;      // Must match the incoming request
+    ack_msg.source_guid = msg->target_guid;        // For example, the ingestor name
+    ack_msg.status = rmf_ingestor_msgs::msg::IngestorResult::ACKNOWLEDGED; // Typically 0
+
+    ingestor_result_pub->publish(ack_msg);
+    RCLCPP_INFO(
+        get_logger(),
+        "Published ACKNOWLEDGED IngestorResult (status=0) for request [%s]",
+        ack_msg.request_guid.c_str());
+
+    // Simulate some processing time (pickup/drop-off delay)
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(1s);
+
+    // Publish a SUCCESS IngestorResult (status = 1)
+    rmf_ingestor_msgs::msg::IngestorResult success_msg;
+    success_msg.time = now();
+    success_msg.request_guid = msg->request_guid;
+    success_msg.source_guid = msg->target_guid;
+    success_msg.status = rmf_ingestor_msgs::msg::IngestorResult::SUCCESS; // Typically 1
+
+    ingestor_result_pub->publish(success_msg);
+    RCLCPP_INFO(
+        get_logger(),
+        "Published SUCCESS IngestorResult (status=1) for request [%s]",
+        success_msg.request_guid.c_str());
 }
 
 void ServerNode::update_state_callback()
@@ -421,7 +517,7 @@ void ServerNode::publish_fleet_state()
     fleet_state.robots.clear();
 
     ReadLock robot_states_lock(robot_states_mutex);
-    for (const auto it : robot_states)
+    for (const auto& it : robot_states)
     {
         const auto fleet_frame_rs = it.second;
         rmf_fleet_msgs::msg::RobotState rmf_frame_rs;

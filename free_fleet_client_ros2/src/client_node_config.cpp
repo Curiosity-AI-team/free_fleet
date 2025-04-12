@@ -26,43 +26,43 @@ namespace ros2
 
 void ClientNodeConfig::print_config() const
 {
-  printf("ROS 2 CLIENT CONFIGURATION\n");
-  printf("  fleet name: %s\n", fleet_name.c_str());
-  printf("  robot name: %s\n", robot_name.c_str());
-  printf("  robot model: %s\n", robot_model.c_str());
-  printf("  level name: %s\n", level_name.c_str());
-  printf("  wait timeout: %.1f\n", wait_timeout);
-  printf("  update request frequency: %.1f\n", update_frequency);
-  printf("  publish state frequency: %.1f\n", publish_frequency);
-  printf("  maximum distance to first waypoint: %.1f\n", 
-      max_dist_to_first_waypoint);
-  printf("  TOPICS\n");
-  printf("    battery state: %s\n", battery_state_topic.c_str());
-  printf("    move base server: %s\n", move_base_server_name.c_str());
-  printf("    docking trigger server: %s\n", docking_trigger_server_name.c_str());
-  printf("  ROBOT FRAMES\n");
-  printf("    map frame: %s\n", map_frame.c_str());
-  printf("    robot frame: %s\n", robot_frame.c_str());
-  printf("CLIENT-SERVER DDS CONFIGURATION\n");
-  printf("  dds domain: %d\n", dds_domain);
-  printf("  TOPICS\n");
-  printf("    robot state: %s\n", dds_state_topic.c_str());
-  printf("    mode request: %s\n", dds_mode_request_topic.c_str());
-  printf("    path request: %s\n", dds_path_request_topic.c_str());
-  printf("    destination request: %s\n", 
-      dds_destination_request_topic.c_str());
-  fflush(stdout);
+    printf("ROS 2 CLIENT CONFIGURATION\n");
+    printf("    fleet name: %s\n", fleet_name.c_str());
+    printf("    robot name: %s\n", robot_name.c_str());
+    printf("    robot model: %s\n", robot_model.c_str());
+    printf("    level name: %s\n", level_name.c_str());
+    printf("    wait timeout: %.1f\n", wait_timeout);
+    printf("    update request frequency: %.1f\n", update_frequency);
+    printf("    publish state frequency: %.1f\n", publish_frequency);
+    printf("    maximum distance to first waypoint: %.1f\n", 
+            max_dist_to_first_waypoint);
+    printf("    TOPICS\n");
+    printf("        battery state: %s\n", battery_state_topic.c_str());
+    printf("        move base server: %s\n", move_base_server_name.c_str());
+    printf("        docking trigger server: %s\n", docking_trigger_server_name.c_str());
+    printf("    ROBOT FRAMES\n");
+    printf("        map frame: %s\n", map_frame.c_str());
+    printf("        robot frame: %s\n", robot_frame.c_str());
+    printf("CLIENT-SERVER DDS CONFIGURATION\n");
+    printf("    dds domain: %d\n", dds_domain);
+    printf("    TOPICS\n");
+    printf("        robot state: %s\n", dds_state_topic.c_str());
+    printf("        mode request: %s\n", dds_mode_request_topic.c_str());
+    printf("        path request: %s\n", dds_path_request_topic.c_str());
+    printf("        destination request: %s\n", 
+            dds_destination_request_topic.c_str());
+    fflush(stdout);
 }
-  
+    
 ClientConfig ClientNodeConfig::get_client_config() const
 {
-  ClientConfig client_config;
-  client_config.dds_domain = dds_domain;
-  client_config.dds_state_topic = dds_state_topic;
-  client_config.dds_mode_request_topic = dds_mode_request_topic;
-  client_config.dds_path_request_topic = dds_path_request_topic;
-  client_config.dds_destination_request_topic = dds_destination_request_topic;
-  return client_config;
+    ClientConfig client_config;
+    client_config.dds_domain = dds_domain;
+    client_config.dds_state_topic = dds_state_topic;
+    client_config.dds_mode_request_topic = dds_mode_request_topic;
+    client_config.dds_path_request_topic = dds_path_request_topic;
+    client_config.dds_destination_request_topic = dds_destination_request_topic;
+    return client_config;
 }
 
 } // namespace ros2

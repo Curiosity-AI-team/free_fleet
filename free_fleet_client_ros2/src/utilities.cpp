@@ -21,7 +21,7 @@
 #include "free_fleet/ros2/utilities.hpp"
 
 #include <tf2/LinearMath/Matrix3x3.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <geometry_msgs/msg/quaternion.hpp>
 
 namespace free_fleet
@@ -29,8 +29,7 @@ namespace free_fleet
 namespace ros2
 {
 
-double get_yaw_from_pose(
-    const geometry_msgs::msg::PoseStamped& _pose_stamped)
+double get_yaw_from_pose(const geometry_msgs::msg::PoseStamped& _pose_stamped)
 {
   return tf2::impl::getYaw(
       tf2::impl::toQuaternion(_pose_stamped.pose.orientation));

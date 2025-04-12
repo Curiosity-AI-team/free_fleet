@@ -24,22 +24,22 @@
 
 int main(int argc, char** argv)
 {
-  rclcpp::init(argc, argv);
-  std::cout << "Greetings from free_fleet_server_ros2" << std::endl;
+    rclcpp::init(argc, argv);
+    std::cout << "Greetings from free_fleet_server_ros2" << std::endl;
 
-  free_fleet::ros2::ServerNodeConfig server_node_config =
-      free_fleet::ros2::ServerNodeConfig::make();
-  server_node_config.fleet_name = "free_fleet_server_ros2";
+    free_fleet::ros2::ServerNodeConfig server_node_config =
+            free_fleet::ros2::ServerNodeConfig::make();
+    server_node_config.fleet_name = "free_fleet_server_ros2";
 
-  auto server_node = free_fleet::ros2::ServerNode::make(server_node_config);
-  if (!server_node)
-    return 1;
+    auto server_node = free_fleet::ros2::ServerNode::make(server_node_config);
+    if (!server_node)
+        return 1;
 
-  rclcpp::executors::MultiThreadedExecutor executor {
-      rclcpp::ExecutorOptions(), 2};
-  executor.add_node(server_node);
-  executor.spin();
+    rclcpp::executors::MultiThreadedExecutor executor {
+            rclcpp::ExecutorOptions(), 2};
+    executor.add_node(server_node);
+    executor.spin();
 
-  rclcpp::shutdown();
-  return 0;
+    rclcpp::shutdown();
+    return 0;
 }

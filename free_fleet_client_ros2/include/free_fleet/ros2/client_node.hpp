@@ -61,123 +61,123 @@ namespace ros2
 class ClientNode : public rclcpp::Node
 {
 public:
-  using SharedPtr = std::shared_ptr<ClientNode>;
-  using Mutex = std::shared_mutex;
-  using ReadLock = std::shared_lock<Mutex>;
-  using WriteLock = std::unique_lock<Mutex>;
+    using SharedPtr = std::shared_ptr<ClientNode>;
+    using Mutex = std::shared_mutex;
+    using ReadLock = std::shared_lock<Mutex>;
+    using WriteLock = std::unique_lock<Mutex>;
 
-  using NavigateToPose = nav2_msgs::action::NavigateToPose;
-  using GoalHandleNavigateToPose = rclcpp_action::ClientGoalHandle<NavigateToPose>;
+    using NavigateToPose = nav2_msgs::action::NavigateToPose;
+    using GoalHandleNavigateToPose = rclcpp_action::ClientGoalHandle<NavigateToPose>;
 
-  explicit ClientNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
-  ~ClientNode() override;
+    explicit ClientNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
+    ~ClientNode() override;
 
-  struct Fields
-  {
-    /// Free fleet client
-    Client::SharedPtr client;
+    struct Fields
+    {
+        /// Free fleet client
+        Client::SharedPtr client;
 
-    // navigation2 action client
-    rclcpp_action::Client<NavigateToPose>::SharedPtr move_base_client;
+        // navigation2 action client
+        rclcpp_action::Client<NavigateToPose>::SharedPtr move_base_client;
 
-    // Docker server client
-    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr docking_trigger_client;
-  };
+        // Docker server client
+        rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr docking_trigger_client;
+    };
 
-  void print_config();
+    void print_config();
 
 private:
-  // --------------------------------------------------------------------------
-  // Battery handling
+    // --------------------------------------------------------------------------
+    // Battery handling
 
-  rclcpp::Subscription<sensor_msgs::msg::BatteryState>::SharedPtr  battery_percent_sub;
-  Mutex battery_state_mutex;
-  sensor_msgs::msg::BatteryState current_battery_state;
-  void battery_state_callback_fn(const sensor_msgs::msg::BatteryState::SharedPtr msg);
+    rclcpp::Subscription<sensor_msgs::msg::BatteryState>::SharedPtr    battery_percent_sub;
+    Mutex battery_state_mutex;
+    sensor_msgs::msg::BatteryState current_battery_state;
+    void battery_state_callback_fn(const sensor_msgs::msg::BatteryState::SharedPtr msg);
 
-  // --------------------------------------------------------------------------
-  // Robot pose handling
+    // --------------------------------------------------------------------------
+    // Robot pose handling
 
-  std::shared_ptr<tf2_ros::Buffer> tf2_buffer;
-  std::shared_ptr<tf2_ros::TransformListener> tf2_listener;
-  Mutex robot_pose_mutex;
-  geometry_msgs::msg::PoseStamped current_robot_pose;
-  geometry_msgs::msg::PoseStamped previous_robot_pose;
+    std::shared_ptr<tf2_ros::Buffer> tf2_buffer;
+    std::shared_ptr<tf2_ros::TransformListener> tf2_listener;
+    Mutex robot_pose_mutex;
+    geometry_msgs::msg::PoseStamped current_robot_pose;
+    geometry_msgs::msg::PoseStamped previous_robot_pose;
 
-  bool get_robot_pose();
+    bool get_robot_pose();
 
-  // --------------------------------------------------------------------------
-  // Mode handling
+    // --------------------------------------------------------------------------
+    // Mode handling
 
-  // TODO: conditions to trigger emergency, however this is most likely for
-  // indicating emergency within the fleet and not in RMF
-  // TODO: figure out a better way to handle multiple triggered modes
-  std::atomic<bool> request_error;
-  std::atomic<bool> emergency;
-  std::atomic<bool> paused;
+    // TODO: conditions to trigger emergency, however this is most likely for
+    // indicating emergency within the fleet and not in RMF
+    // TODO: figure out a better way to handle multiple triggered modes
+    std::atomic<bool> request_error;
+    std::atomic<bool> emergency;
+    std::atomic<bool> paused;
 
-  messages::RobotMode get_robot_mode();
-  bool read_mode_request();
+    messages::RobotMode get_robot_mode();
+    bool read_mode_request();
 
-  // --------------------------------------------------------------------------
-  // Path request handling
+    // --------------------------------------------------------------------------
+    // Path request handling
 
-  bool read_path_request();
+    bool read_path_request();
 
-  // --------------------------------------------------------------------------
-  // Destination request handling
+    // --------------------------------------------------------------------------
+    // Destination request handling
 
-  bool read_destination_request();
+    bool read_destination_request();
 
-  // --------------------------------------------------------------------------
-  // Task request handling
+    // --------------------------------------------------------------------------
+    // Task request handling
 
-  bool read_task_request();
+    bool read_task_request();
 
-  // --------------------------------------------------------------------------
-  // Task handling
+    // --------------------------------------------------------------------------
+    // Task handling
 
-  bool is_valid_request(
-      const std::string& request_fleet_name,
-      const std::string& request_robot_name,
-      const std::string& request_task_id);
+    bool is_valid_request(
+            const std::string& request_fleet_name,
+            const std::string& request_robot_name,
+            const std::string& request_task_id);
 
-  Mutex task_id_mutex;
-  std::string current_task_id;
+    Mutex task_id_mutex;
+    std::string current_task_id;
 
-  NavigateToPose::Goal location_to_nav_goal(
-    const messages::Location& _location) const;
+    NavigateToPose::Goal location_to_nav_goal(
+        const messages::Location& _location) const;
 
-  struct Goal
-  {
-    std::string level_name;
-    NavigateToPose::Goal goal;
-    bool sent = false;
-    uint32_t aborted_count = 0;
-    rclcpp::Time goal_end_time;
-  };
+    struct Goal
+    {
+        std::string level_name;
+        NavigateToPose::Goal goal;
+        bool sent = false;
+        uint32_t aborted_count = 0;
+        rclcpp::Time goal_end_time;
+    };
 
-  Mutex goal_path_mutex;
-  std::deque<Goal> goal_path;
+    Mutex goal_path_mutex;
+    std::deque<Goal> goal_path;
 
-  void read_requests();
-  void handle_requests();
-  void publish_robot_state();
+    void read_requests();
+    void handle_requests();
+    void publish_robot_state();
 
-  // --------------------------------------------------------------------------
-  // publish and update functions and timers
+    // --------------------------------------------------------------------------
+    // publish and update functions and timers
 
-  std::shared_ptr<rclcpp::TimerBase> update_timer;
-  std::shared_ptr<rclcpp::TimerBase> publish_timer;
-  void update_fn();
-  void publish_fn();
+    std::shared_ptr<rclcpp::TimerBase> update_timer;
+    std::shared_ptr<rclcpp::TimerBase> publish_timer;
+    void update_fn();
+    void publish_fn();
 
-  // --------------------------------------------------------------------------
+    // --------------------------------------------------------------------------
 
-  ClientNodeConfig client_node_config;
-  Fields fields;
+    ClientNodeConfig client_node_config;
+    Fields fields;
 
-  void start(Fields fields);
+    void start(Fields fields);
 };
 
 } // namespace ros2

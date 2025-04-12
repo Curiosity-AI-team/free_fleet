@@ -36,6 +36,8 @@
 #include <rmf_task_msgs/srv/submit_task.hpp>
 #include <rmf_dispenser_msgs/msg/dispenser_request.hpp>
 #include <rmf_ingestor_msgs/msg/ingestor_request.hpp>
+#include <rmf_dispenser_msgs/msg/dispenser_result.hpp>
+#include <rmf_ingestor_msgs/msg/ingestor_result.hpp>
 
 #include <free_fleet/Server.hpp>
 #include <free_fleet/messages/Location.hpp>
@@ -113,19 +115,16 @@ private:
   // --------------------------------------------------------------------------
 
 
-  rclcpp::Subscription<rmf_dispenser_msgs::msg::DispenserRequest>::SharedPtr
-      dispenser_request_sub;
+  rclcpp::Subscription<rmf_dispenser_msgs::msg::DispenserRequest>::SharedPtr dispenser_request_sub;
+  rclcpp::Subscription<rmf_ingestor_msgs::msg::IngestorRequest>::SharedPtr ingestor_request_sub;
 
-  void handle_dispenser_request(
-      rmf_dispenser_msgs::msg::DispenserRequest::UniquePtr msg);
+  void handle_dispenser_request(rmf_dispenser_msgs::msg::DispenserRequest::UniquePtr msg);
+  void handle_ingestor_request(rmf_ingestor_msgs::msg::IngestorRequest::UniquePtr msg);
 
   // --------------------------------------------------------------------------
 
-  rclcpp::Subscription<rmf_ingestor_msgs::msg::IngestorRequest>::SharedPtr
-      ingestor_request_sub;
-      
-  void handle_ingestor_request(
-      rmf_ingestor_msgs::msg::IngestorRequest::UniquePtr msg);
+  rclcpp::Publisher<rmf_dispenser_msgs::msg::DispenserResult>::SharedPtr dispenser_result_pub;
+  rclcpp::Publisher<rmf_ingestor_msgs::msg::IngestorResult>::SharedPtr ingestor_result_pub;
       
   // --------------------------------------------------------------------------
 

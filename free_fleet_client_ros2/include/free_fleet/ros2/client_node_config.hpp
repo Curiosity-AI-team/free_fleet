@@ -32,34 +32,34 @@ namespace ros2
 struct ClientNodeConfig
 {
 
-  std::string fleet_name = "fleet_name";
-  std::string robot_name = "robot_name";
-  std::string robot_model = "robot_model";
-  std::string level_name = "level_name";
+    std::string fleet_name = "fleet_name";
+    std::string robot_name = "robot_name";
+    std::string robot_model = "robot_model";
+    std::string level_name = "level_name";
 
-  std::string battery_state_topic = "/battery_state";
+    std::string battery_state_topic = "/battery_state";
 
-  std::string map_frame = "map";
-  std::string robot_frame = "base_footprint";
+    std::string map_frame = "map";
+    std::string robot_frame = "base_footprint";
 
-  std::string move_base_server_name = "move_base";
-  std::string docking_trigger_server_name = "";
+    std::string move_base_server_name = "move_base";
+    std::string docking_trigger_server_name = "";
 
-  int dds_domain = 42;
-  std::string dds_state_topic = "robot_state";
-  std::string dds_mode_request_topic = "mode_request";
-  std::string dds_path_request_topic = "path_request";
-  std::string dds_destination_request_topic = "destination_request";
+    int dds_domain = 42;
+    std::string dds_state_topic = "robot_state";
+    std::string dds_mode_request_topic = "mode_request";
+    std::string dds_path_request_topic = "path_request";
+    std::string dds_destination_request_topic = "destination_request";
 
-  double wait_timeout = 10.0;
-  double update_frequency = 10.0;
-  double publish_frequency = 1.0;
+    double wait_timeout = 10.0;
+    double update_frequency = 10.0;
+    double publish_frequency = 1.0;
 
-  double max_dist_to_first_waypoint = 10.0;
+    double max_dist_to_first_waypoint = 10.0;
 
-  void print_config() const;
+    void print_config() const;
 
-  ClientConfig get_client_config() const;
+    ClientConfig get_client_config() const;
 };
 
 } // namespace ros2
