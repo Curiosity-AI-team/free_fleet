@@ -28,6 +28,7 @@ if (ament_cmake_FOUND)
     geometry_msgs
     rmf_fleet_msgs
     free_fleet
+    rtabmap_msgs
   )
 
   foreach(dep ${dependencies})

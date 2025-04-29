@@ -155,9 +155,6 @@ void ClientNode::start(Fields _fields)
         client_node_config.battery_state_topic, rclcpp::SensorDataQoS().keep_last(1),
         std::bind(&ClientNode::battery_state_callback_fn, this, std::placeholders::_1));
 
-    localization_sub_ = create_subscription<rtabmap_msgs::msg::OdomInfo>("rtabmap/odom_info", rclcpp::QoS(1).best_effort(),
-                                                std::bind(&ClientNode::localization_callback, this, std::placeholders::_1));
-
     request_error = false;
     emergency = false;
     paused = false;
@@ -181,22 +178,6 @@ void ClientNode::battery_state_callback_fn(
 {
     WriteLock battery_state_lock(battery_state_mutex);
     current_battery_state = *_msg;
-}
-
-void ClientNode::localization_callback(const rtabmap_msgs::msg::OdomInfo::SharedPtr info)
-{
-    if (info->lost) {
-        RCLCPP_ERROR(get_logger(),
-            "RTAB-Map reports localization lost! Triggering RMF error mode.");
-        // cancel any in-flight Nav2 goals so you don’t keep driving blind
-        fields.move_base_client->async_cancel_all_goals();
-        // flag RMF adapter into error
-        request_error = true;
-    }
-    else {
-        RCLCPP_INFO(get_logger(), "Localization regained.");
-        request_error = false;
-    }
 }
 
 bool ClientNode::get_robot_pose()

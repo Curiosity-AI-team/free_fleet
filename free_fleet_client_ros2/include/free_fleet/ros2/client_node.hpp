@@ -50,6 +50,7 @@
 
 #include <free_fleet/Client.hpp>
 #include <free_fleet/messages/Location.hpp>
+#include "rtabmap_msgs/msg/odom_info.hpp"
 
 #include "free_fleet/ros2/client_node_config.hpp"
 
@@ -86,6 +87,8 @@ public:
 
     void print_config();
 
+    rclcpp::Subscription<rtabmap_msgs::msg::OdomInfo>::SharedPtr localization_sub_;
+
 private:
     // --------------------------------------------------------------------------
     // Battery handling
@@ -94,7 +97,7 @@ private:
     Mutex battery_state_mutex;
     sensor_msgs::msg::BatteryState current_battery_state;
     void battery_state_callback_fn(const sensor_msgs::msg::BatteryState::SharedPtr msg);
-
+    void localization_callback(const rtabmap_msgs::msg::OdomInfo::SharedPtr info);
     // --------------------------------------------------------------------------
     // Robot pose handling
 
