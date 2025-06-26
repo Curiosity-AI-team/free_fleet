@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5.0)
+cmake_minimum_required(VERSION 3.5)
 project(free_fleet_client_ros2)
 
 # Default to C++17
@@ -6,16 +6,22 @@ if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
 endif()
 
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  # we dont use add_compile_options with pedantic in message packages
-  # because the Python C extensions dont comply with it
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic")
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-find_package(ament_cmake QUIET)
+find_package(ament_cmake REQUIRED)
 
 if (ament_cmake_FOUND)
+  # ————————————————  
+  # cpp-httplib via pkg-config  
+  # ————————————————  
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(CPPHTTPLIB REQUIRED cpp-httplib)
 
+  # ————————————————  
+  # ROS 2 & other deps  
+  # ————————————————  
   set(dependencies
     rclcpp
     rclcpp_action
@@ -29,44 +35,55 @@ if (ament_cmake_FOUND)
     rmf_fleet_msgs
     free_fleet
     rtabmap_msgs
+    nlohmann_json
   )
-
   foreach(dep ${dependencies})
     find_package(${dep} REQUIRED)
   endforeach()
 
-  #=============================================================================
-
-  include_directories(include)
+  # ————————————————  
+  # Main executable  
+  # ————————————————  
   add_executable(free_fleet_client_ros2
     src/main.cpp
     src/utilities.cpp
     src/client_node.cpp
     src/client_node_config.cpp
   )
+
   ament_target_dependencies(free_fleet_client_ros2
     ${dependencies}
   )
 
-  #=============================================================================
-
-  set(testing_targets
-    fake_action_server
-    fake_docking_server
+  target_include_directories(free_fleet_client_ros2
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      ${CPPHTTPLIB_INCLUDE_DIRS}
   )
-  foreach(target ${testing_targets})
-    add_executable(${target}
-      src/tests/${target}.cpp
-    )
+
+  target_link_libraries(free_fleet_client_ros2
+      ${CPPHTTPLIB_LIBRARIES}
+  )
+
+  # ————————————————  
+  # Testing binaries  
+  # ————————————————  
+  foreach(target
+    fake_action_server
+    fake_docking_server)
+    add_executable(${target} src/tests/${target}.cpp)
     ament_target_dependencies(${target}
       ${dependencies}
     )
   endforeach()
 
-  #=============================================================================
-
-  install(TARGETS free_fleet_client_ros2
-    ${testing_targets}
+  # ————————————————  
+  # Installation  
+  # ————————————————  
+  install(TARGETS
+    free_fleet_client_ros2
+    fake_action_server
+    fake_docking_server
     RUNTIME DESTINATION lib/${PROJECT_NAME}
   )
 

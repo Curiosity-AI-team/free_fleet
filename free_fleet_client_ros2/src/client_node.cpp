@@ -30,6 +30,10 @@
 #include "free_fleet/ros2/client_node.hpp"
 #include "free_fleet/ros2/client_node_config.hpp"
 
+#include <httplib.h>
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
+
 namespace free_fleet
 {
 namespace ros2
@@ -141,6 +145,38 @@ ClientNode::ClientNode(const rclcpp::NodeOptions & options)
                 std::move(move_base_client),
                 std::move(docking_trigger_client)
             });
+    
+    // --- HTTP server for GET /mode ---
+    // Example: curl http://localhost:8790/mode
+    std::thread([this]() {
+        httplib::Server srv;
+
+        static const std::map<int,std::string> MODE_NAMES_MAP = {
+                {messages::RobotMode::MODE_IDLE,          "idle"},
+                {messages::RobotMode::MODE_CHARGING,      "charging"},
+                {messages::RobotMode::MODE_MOVING,        "moving"},
+                {messages::RobotMode::MODE_PAUSED,        "paused"},
+                {messages::RobotMode::MODE_WAITING,       "waiting"},
+                {messages::RobotMode::MODE_EMERGENCY,     "emergency"},
+                {messages::RobotMode::MODE_GOING_HOME,    "going_home"},
+                {messages::RobotMode::MODE_DOCKING,       "docking"},
+                {messages::RobotMode::MODE_REQUEST_ERROR, "request_error"}
+        };
+        srv.Get("/mode", [this](const httplib::Request&, httplib::Response& res) {
+            auto mode_msg = this->get_robot_mode();
+            int mode_code = mode_msg.mode;
+            auto it = MODE_NAMES_MAP.find(mode_code);
+            std::string mode_name = (it != MODE_NAMES_MAP.end()) ? it->second : "unknown";
+            // 2) build JSON:
+            json j;
+            j["mode_code"] = mode_code;
+            j["mode_name"] = mode_name;
+            res.set_content(j.dump(2), "application/json");
+        });
+        
+        RCLCPP_INFO(get_logger(), "Starting HTTP server on :8990");
+        srv.listen("0.0.0.0", 8790);
+    }).detach();
 }
 
 ClientNode::~ClientNode()
