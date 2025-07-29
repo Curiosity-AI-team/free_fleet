@@ -16,6 +16,7 @@
  */
 
 #include "ClientImpl.hpp"
+#include <iostream>
 #include "messages/message_utils.hpp"
 
 namespace free_fleet {
@@ -66,7 +67,47 @@ bool Client::ClientImpl::read_path_request(
   auto path_requests = fields.path_request_sub->read();
   if (!path_requests.empty())
   {
+
+      // --- print the *raw* DDS message before conversion ---
+  // --- 1) Dump the raw DDS message contents: ---
+  std::cout << "RAW DDS PathRequest waypoints:\n";
+  try {
+    // path_requests[0] is a shared_ptr<const FreeFleetData_PathRequest>
+    auto raw = path_requests[0].get();
+    for (uint32_t i = 0; i < raw->path._length; ++i) {
+      auto& loc = raw->path._buffer[i];
+      std::cout
+        << "  [" << i << "]"
+        << " x="    << loc.x
+        << " y="    << loc.y
+        << " speed_limit=" << loc.approach_speed_limit
+        << " obey=" << std::boolalpha
+        << loc.obey_approach_speed_limit
+        << "\n";
+    }
+  } catch (const std::exception& e) {
+    std::cout << "  (error printing raw DDS: " << e.what() << ")\n";
+  }
     convert(*(path_requests[0]), _path_request);
+    std::cout << "AAAAAAAAAAAAAAAAAAPPPPPPPPPPPPPP \n";
+  // now try to print waypoint #1
+// After you’ve called convert(...,_path_request):
+try {
+  for (size_t i = 0; ; ++i) {
+    const auto& wp = _path_request.path.at(i);  // throws when i >= size()
+    std::cout
+      << "waypoint[" << i << "] → "
+      << "x="  << wp.x
+      << ", y=" << wp.y
+      << ", speed_limit=" << wp.approach_speed_limit
+      << std::endl;
+  }
+}
+catch (const std::out_of_range&) {
+  std::cout
+    << "Printed all waypoints (count=" << _path_request.path.size() << ")\n";
+}
+
     return true;
   }
   return false;

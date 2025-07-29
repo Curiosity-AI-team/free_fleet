@@ -46,6 +46,8 @@ void convert(const Location& _input, FreeFleetData_Location& _output)
   _output.y = _input.y;
   _output.yaw = _input.yaw;
   _output.level_name = common::dds_string_alloc_and_copy(_input.level_name);
+  _output.obey_approach_speed_limit = _input.obey_approach_speed_limit;
+  _output.approach_speed_limit = _input.approach_speed_limit;
 }
 
 void convert(const FreeFleetData_Location& _input, Location& _output)
@@ -56,6 +58,8 @@ void convert(const FreeFleetData_Location& _input, Location& _output)
   _output.y = _input.y;
   _output.yaw = _input.yaw;
   _output.level_name = std::string(_input.level_name);
+  _output.obey_approach_speed_limit = _input.obey_approach_speed_limit;
+  _output.approach_speed_limit = _input.approach_speed_limit;
 }
 
 void convert(const RobotState& _input, FreeFleetData_RobotState& _output)

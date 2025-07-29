@@ -22,8 +22,7 @@ namespace free_fleet
 namespace ros2
 {
 
-void to_ff_message(
-        const rmf_fleet_msgs::msg::Location& _in_msg, messages::Location& _out_msg)
+void to_ff_message(const rmf_fleet_msgs::msg::Location& _in_msg, messages::Location& _out_msg)
 {
     _out_msg.sec = _in_msg.t.sec;
     _out_msg.nanosec = _in_msg.t.nanosec;
@@ -31,6 +30,8 @@ void to_ff_message(
     _out_msg.y = _in_msg.y;
     _out_msg.yaw = _in_msg.yaw;
     _out_msg.level_name = _in_msg.level_name;
+    _out_msg.obey_approach_speed_limit = _in_msg.obey_approach_speed_limit;
+    _out_msg.approach_speed_limit = _in_msg.approach_speed_limit;
 }
 
 // void to_ff_message(
@@ -125,9 +126,7 @@ void to_ff_message(
     _out_msg.task_id = _in_msg.task_id;
 }
 
-void to_ff_message(
-        const rmf_fleet_msgs::msg::DestinationRequest& _in_msg, 
-        messages::DestinationRequest& _out_msg)
+void to_ff_message(const rmf_fleet_msgs::msg::DestinationRequest& _in_msg, messages::DestinationRequest& _out_msg)
 {
     _out_msg.fleet_name = _in_msg.fleet_name;
     _out_msg.robot_name = _in_msg.robot_name;

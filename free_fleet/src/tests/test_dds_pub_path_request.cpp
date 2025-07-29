@@ -92,12 +92,12 @@ int main (int argc, char ** argv)
   msg->robot_name = free_fleet::common::dds_string_alloc_and_copy(robot_name);
   msg->task_id = free_fleet::common::dds_string_alloc_and_copy(task_id);
 
-  msg->path._maximum = 50;
-  msg->path._length = 50;
-  msg->path._buffer = FreeFleetData_PathRequest_path_seq_allocbuf(10);
-  msg->path._release = false;
+  msg->path._maximum = 5;
+  msg->path._length = 5;
+  msg->path._buffer = FreeFleetData_PathRequest_path_seq_allocbuf(50);
+  msg->path._release = true;
 
-  for (int i = 0; i < 50; ++i)
+  for (int i = 0; i < 5; ++i)
   {
     msg->path._buffer[i].sec = 123 + i;
     msg->path._buffer[i].nanosec = 123 + i;
@@ -105,6 +105,9 @@ int main (int argc, char ** argv)
     msg->path._buffer[i].y = 1.489 + i;
     msg->path._buffer[i].yaw = 0.0;
     msg->path._buffer[i].level_name = free_fleet::common::dds_string_alloc_and_copy(level_name);
+    msg->path._buffer[i].obey_approach_speed_limit = true;
+    msg->path._buffer[i].approach_speed_limit = 2.5;
+
   }
 
   printf ("=== [Publisher]  Writing : ");

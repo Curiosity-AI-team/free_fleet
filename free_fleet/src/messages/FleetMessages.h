@@ -50,6 +50,8 @@ typedef struct FreeFleetData_Location
   float y;
   float yaw;
   char * level_name;
+  bool   obey_approach_speed_limit;
+  double approach_speed_limit;
 } FreeFleetData_Location;
 
 extern const dds_topic_descriptor_t FreeFleetData_Location_desc;

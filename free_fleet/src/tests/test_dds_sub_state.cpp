@@ -89,6 +89,8 @@ int main(int argc, char** argv)
       std::cout << "x: " << msg->location.x << std::endl;
       std::cout << "y: " << msg->location.y << std::endl;
       std::cout << "yaw: " << msg->location.yaw << std::endl;
+      std::cout << "speed: " << msg->location.approach_speed_limit << std::endl;
+      std::cout << "yaw: " << msg->location.approach_speed_limit << std::endl;
       std::cout << "mode: ";
       if (msg->mode.mode == FreeFleetData_RobotMode_Constants_MODE_IDLE)
         std::cout << "IDLE" << std::endl;

@@ -34,6 +34,7 @@
 #include <std_srvs/srv/trigger.hpp>
 #include <sensor_msgs/msg/battery_state.hpp>
 #include <nav2_msgs/action/navigate_to_pose.hpp>
+#include <std_srvs/srv/trigger.hpp>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
 
@@ -98,6 +99,7 @@ private:
     sensor_msgs::msg::BatteryState current_battery_state;
     void battery_state_callback_fn(const sensor_msgs::msg::BatteryState::SharedPtr msg);
     void localization_callback(const rtabmap_msgs::msg::OdomInfo::SharedPtr info);
+    void check_battery_and_handle_charging();
     // --------------------------------------------------------------------------
     // Robot pose handling
 
@@ -155,6 +157,7 @@ private:
     {
         std::string level_name;
         NavigateToPose::Goal goal;
+        double approach_speed_limit;
         bool sent = false;
         uint32_t aborted_count = 0;
         rclcpp::Time goal_end_time;
@@ -176,11 +179,21 @@ private:
     void publish_fn();
 
     // --------------------------------------------------------------------------
+    void set_goal_tolerances(double xy_tol, double yaw_tol, bool statful);
 
     ClientNodeConfig client_node_config;
     Fields fields;
-
+    std::mutex     mode_request_mutex;
+    bool           idle_requested_{false};
+    std::string    next_task_id_for_idle_;
     void start(Fields fields);
+
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr     recharge_cli_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr     dis_recharge_cli_;
+    double low_bat_threshold_ = 0.20;
+    double recharge_soc_      = 0.80;
+    bool   going_to_charge_  = false;
+    bool   charger_active_   = false;
 };
 
 } // namespace ros2

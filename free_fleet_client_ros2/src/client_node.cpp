@@ -29,7 +29,7 @@
 #include "free_fleet/ros2/utilities.hpp"
 #include "free_fleet/ros2/client_node.hpp"
 #include "free_fleet/ros2/client_node_config.hpp"
-
+#include <shared_mutex>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 using json = nlohmann::json;
@@ -152,15 +152,15 @@ ClientNode::ClientNode(const rclcpp::NodeOptions & options)
         httplib::Server srv;
 
         static const std::map<int,std::string> MODE_NAMES_MAP = {
-                {messages::RobotMode::MODE_IDLE,          "idle"},
-                {messages::RobotMode::MODE_CHARGING,      "charging"},
-                {messages::RobotMode::MODE_MOVING,        "moving"},
-                {messages::RobotMode::MODE_PAUSED,        "paused"},
-                {messages::RobotMode::MODE_WAITING,       "waiting"},
-                {messages::RobotMode::MODE_EMERGENCY,     "emergency"},
-                {messages::RobotMode::MODE_GOING_HOME,    "going_home"},
-                {messages::RobotMode::MODE_DOCKING,       "docking"},
-                {messages::RobotMode::MODE_REQUEST_ERROR, "request_error"}
+                {0,          "idle"},
+                {1,      "charging"},
+                {2,        "moving"},
+                {3,        "paused"},
+                {4,       "waiting"},
+                {5,     "emergency"},
+                {6,    "going_home"},
+                {7,       "docking"},
+                {8, "request_error"}
         };
         srv.Get("/mode", [this](const httplib::Request&, httplib::Response& res) {
             auto mode_msg = this->get_robot_mode();
@@ -177,6 +177,10 @@ ClientNode::ClientNode(const rclcpp::NodeOptions & options)
         RCLCPP_INFO(get_logger(), "Starting HTTP server on :8990");
         srv.listen("0.0.0.0", 8790);
     }).detach();
+
+    recharge_cli_    = this->create_client<std_srvs::srv::Trigger>("/recharge");
+    dis_recharge_cli_= this->create_client<std_srvs::srv::Trigger>("/dis_recharge");
+
 }
 
 ClientNode::~ClientNode()
@@ -212,8 +216,7 @@ void ClientNode::print_config()
     client_node_config.print_config();
 }
 
-void ClientNode::battery_state_callback_fn(
-    const sensor_msgs::msg::BatteryState::SharedPtr _msg)
+void ClientNode::battery_state_callback_fn(const sensor_msgs::msg::BatteryState::SharedPtr _msg)
 {
     WriteLock battery_state_lock(battery_state_mutex);
     current_battery_state = *_msg;
@@ -270,8 +273,7 @@ messages::RobotMode ClientNode::get_robot_mode()
     {
         ReadLock battery_state_lock(battery_state_mutex);
 
-        if (current_battery_state.power_supply_status ==
-            current_battery_state.POWER_SUPPLY_STATUS_CHARGING)
+        if (current_battery_state.power_supply_status == current_battery_state.POWER_SUPPLY_STATUS_CHARGING)
         {
             return messages::RobotMode{messages::RobotMode::MODE_CHARGING};
         }
@@ -381,6 +383,32 @@ bool ClientNode::is_valid_request(const std::string & _request_fleet_name,
     return true;
 }
 
+// ros2 param get /controller_server general_goal_checker.xy_goal_tolerance
+// ros2 param get /controller_server general_goal_checker.yaw_goal_tolerance
+void ClientNode::set_goal_tolerances(double xy_tol, double yaw_tol, bool stateful)
+{
+    using namespace std::chrono_literals;
+
+    // ➊ one hidden node shared by all calls — NOT part of any external executor
+    static auto helper_node = std::make_shared<rclcpp::Node>("_nav2_param_helper");
+
+    // ➋ the SyncParametersClient that uses that helper node
+    static auto param_client = std::make_shared<rclcpp::SyncParametersClient>(helper_node, "controller_server");
+
+    if (!param_client->wait_for_service(1s))
+    {
+        RCLCPP_WARN(get_logger(), "controller_server not available – tolerances unchanged");
+        return;
+    }
+
+    param_client->set_parameters({
+        rclcpp::Parameter("general_goal_checker.xy_goal_tolerance",  xy_tol),
+        rclcpp::Parameter("general_goal_checker.yaw_goal_tolerance", yaw_tol),
+        rclcpp::Parameter("general_goal_checker.stateful",           stateful)
+    });
+
+    RCLCPP_INFO(get_logger(), "Updated Nav2 tolerances: xy=%.3f  yaw=%.3f", xy_tol, yaw_tol);
+}
 
 nav2_msgs::action::NavigateToPose::Goal ClientNode::location_to_nav_goal(const messages::Location& _location) const
 {
@@ -487,12 +515,10 @@ bool ClientNode::read_path_request()
             ReadLock robot_transform_lock(robot_pose_mutex);
             const double dx = path_request.path[0].x - current_robot_pose.pose.position.x;
             const double dy = path_request.path[0].y - current_robot_pose.pose.position.y;
-            const double dist_to_first_waypoint = sqrt(dx*dx + dy*dy);
-
+            const double dist_to_first_waypoint = std::hypot(dx,dy);
             RCLCPP_INFO(get_logger(), "distance to first waypoint: %.2f\n", dist_to_first_waypoint);
 
-            if (dist_to_first_waypoint >
-                    client_node_config.max_dist_to_first_waypoint)
+            if (dist_to_first_waypoint > client_node_config.max_dist_to_first_waypoint)
             {
                 RCLCPP_WARN(get_logger(), "distance was over threshold of %.2f ! Rejecting path,"
                         "waiting for next valid request.\n",
@@ -531,28 +557,28 @@ bool ClientNode::read_path_request()
                         // Calculate yaw if not the last point
                         if (i < path_request.path.size() - 1)
                         {
-                        double dx = path_request.path[i + 1].x - path_request.path[i].x;
-                        double dy = path_request.path[i + 1].y - path_request.path[i].y;
-                        path_request.path[i].yaw = atan2(dy, dx); // Calculate yaw angle
+                            double dx = path_request.path[i + 1].x - path_request.path[i].x;
+                            double dy = path_request.path[i + 1].y - path_request.path[i].y;
+                            path_request.path[i].yaw = atan2(dy, dx); // Calculate yaw angle
                         }
                         else
                         {
-                        // For the last point, use the yaw of the previous point
-                        if (path_request.path.size() > 1)
-                                path_request.path[i].yaw = path_request.path[i - 1].yaw;
-                        else
-                                path_request.path[i].yaw = 0.0; // Default yaw if only one point exists
+                            // For the last point, use the yaw of the previous point
+                            if (path_request.path.size() > 1)
+                                    path_request.path[i].yaw = path_request.path[i - 1].yaw;
+                            else
+                                    path_request.path[i].yaw = 0.0; // Default yaw if only one point exists
                         }
 
                         // Debug logs
                         RCLCPP_INFO(get_logger(), "size: %lu", path_request.path.size());
                         RCLCPP_INFO(get_logger(), "sec: %u, yaw: %.2f", path_request.path[i].sec, path_request.path[i].yaw);
-
                         // Add the waypoint to the goal path
                         goal_path.push_back(
                                 Goal {
                                         path_request.path[i].level_name,
                                         location_to_nav_goal(path_request.path[i]),
+                                        path_request.path[i].approach_speed_limit,
                                         false,
                                         0,
                                         this->now()
@@ -587,6 +613,7 @@ bool ClientNode::read_destination_request()
                     Goal {
                             destination_request.destination.level_name,
                             location_to_nav_goal(destination_request.destination),
+                            0.0,
                             false,
                             0,
                             rclcpp::Time(
@@ -619,9 +646,49 @@ void ClientNode::read_requests()
     }
 }
 
+
+void ClientNode::check_battery_and_handle_charging()
+{
+    double soc;
+    {
+        ReadLock bat_lock(battery_state_mutex);
+        soc = current_battery_state.percentage;  // 0.0–1.0
+    }
+
+    // 1) dispatch a 1‑round “station→charger” patrol when SOC ≤ threshold
+    if (!going_to_charge_ && soc <= low_bat_threshold_)
+    {
+        RCLCPP_WARN(get_logger(), "[%s] SOC=%.0f%% low → sending auto‑charge request", client_node_config.robot_name.c_str(), soc*100.0);
+        going_to_charge_ = true;
+    }
+
+    // 2) once we see the ROS battery_status flip to CHARGING, call /recharge
+    {
+        ReadLock bat_lock(battery_state_mutex);
+        if (going_to_charge_ && !charger_active_)
+        {
+            charger_active_ = true;
+            auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
+            recharge_cli_->async_send_request(req);
+            RCLCPP_INFO(get_logger(), "→ called /recharge (std_srvs::Trigger)");
+        }
+    }
+
+    // 3) when SOC climbs back above recharge_soc_, call /dis_recharge once
+    if (charger_active_ && soc >= recharge_soc_)
+    {
+        auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
+        dis_recharge_cli_->async_send_request(req);
+        RCLCPP_INFO(get_logger(), "→ called /dis_recharge (std_srvs::Trigger)");
+
+        charger_active_  = false;
+        going_to_charge_ = false;
+    }
+}
+
 void ClientNode::handle_requests()
 {
-    // there is an emergency or the robot is paused
+
     if (emergency || request_error || paused)
         return;
 
@@ -634,7 +701,7 @@ void ClientNode::handle_requests()
         // Calculate the distance to the goal
         double dx = current_goal.goal.pose.pose.position.x - current_robot_pose.pose.position.x;
         double dy = current_goal.goal.pose.pose.position.y - current_robot_pose.pose.position.y;
-        double distance_to_goal = sqrt(dx * dx + dy * dy);
+        double distance_to_goal = std::hypot(dx, dy);
 
         // Calculate the yaw error
         double yaw_to_goal = get_yaw_from_pose(current_goal.goal.pose);
@@ -646,7 +713,7 @@ void ClientNode::handle_requests()
         // RCLCPP_INFO(get_logger(), "current_yaw: %.5f", current_yaw);
         // RCLCPP_INFO(get_logger(), "Distance to goal: %.3f", distance_to_goal);
         // RCLCPP_INFO(get_logger(), "Yaw error: %.5f", yaw_error);
-
+        
         auto send_goal_options = rclcpp_action::Client<NavigateToPose>::SendGoalOptions();
         send_goal_options.goal_response_callback = [&](const GoalHandleNavigateToPose::SharedPtr & goal) {
             if (!goal) {
@@ -740,6 +807,17 @@ void ClientNode::handle_requests()
         // Goals must have been updated since last handling, execute them now
         if (!goal_path.front().sent)
         {
+
+            // ────────────────────────────────────────────────────────────────
+            // If that waypoint carried a non‑zero approach_speed_limit,
+            // tighten (or loosen) Nav2’s tolerances before we dispatch it.
+            // Feel free to map speed→tolerance any way you like.
+            if (goal_path.front().approach_speed_limit != 0.0) {
+                set_goal_tolerances(2.0, 2.05, false);   // 5 cm / 0.05 rad
+            } else {
+                set_goal_tolerances(0.25, 0.25, true);   // default 25 cm / 0.25 rad
+            }
+            // ────────────────────────────────────────────────────────────────
             RCLCPP_INFO(get_logger(), "Sending next goal.");
             fields.move_base_client->async_send_goal(goal_path.front().goal, send_goal_options);
             goal_path.front().sent = true;
@@ -753,6 +831,7 @@ void ClientNode::update_fn()
     get_robot_pose();
     read_requests();
     handle_requests();
+    check_battery_and_handle_charging();
 }
 
 void ClientNode::publish_fn()

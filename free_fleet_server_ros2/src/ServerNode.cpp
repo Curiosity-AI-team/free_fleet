@@ -28,6 +28,7 @@
 
 #include "utilities.hpp"
 #include "ServerNode.hpp"
+#include "nlohmann/json.hpp"
 
 namespace free_fleet
 {
@@ -240,6 +241,37 @@ void ServerNode::start(Fields _fields)
 
     ingestor_result_pub = create_publisher<rmf_ingestor_msgs::msg::IngestorResult>(
         "/ingestor_results", 10);
+
+    api_pub_ = create_publisher<rmf_task_msgs::msg::ApiRequest>("/task_api_requests", rclcpp::QoS(10).transient_local());
+}
+
+void ServerNode::dispatch_charge_task(const std::string& robot_name)
+{
+    rmf_task_msgs::msg::ApiRequest req;
+    req.request_id = "auto_charge_" + robot_name + "_" + std::to_string(charge_request_counter_++);
+
+    nlohmann::json j =
+    {
+        {"type", "dispatch_task_request"},
+        {"request",
+        {
+            {"unix_millis_earliest_start_time", 0},
+            {"priority", {{"type", "binary"}, {"value", 0}}},
+            {"labels", {"auto_charge"}},
+            {"category", "patrol"},
+            {"description",
+            {
+                {"places", {"station", "charger"}},
+                {"rounds", 1}
+            }},
+            {"dispatch_task", {{"robot_name", robot_name}}}
+        }}
+    };
+
+    req.json_msg = j.dump();
+    api_pub_->publish(req);
+
+    RCLCPP_INFO(get_logger(), "[battery‑watch] Sent auto‑charge task for %s (req %s)", robot_name.c_str(), req.request_id.c_str());
 }
 
 bool ServerNode::is_request_valid(const std::string& _fleet_name, const std::string& _robot_name)
@@ -324,6 +356,9 @@ void ServerNode::transform_rmf_to_fleet(const rmf_fleet_msgs::msg::Location& _rm
 
     _fleet_frame_location.t = _rmf_frame_location.t;
     _fleet_frame_location.level_name = _rmf_frame_location.level_name;
+    _fleet_frame_location.approach_speed_limit = _rmf_frame_location.approach_speed_limit;
+    _fleet_frame_location.obey_approach_speed_limit = _rmf_frame_location.obey_approach_speed_limit;
+
 }
 
 void ServerNode::handle_mode_request(rmf_fleet_msgs::msg::ModeRequest::UniquePtr _msg)
@@ -342,13 +377,11 @@ void ServerNode::handle_path_request(rmf_fleet_msgs::msg::PathRequest::UniquePtr
         // Get the first and last waypoints
         const auto& first_wp = _msg->path.front();
         const auto& last_wp = _msg->path.back();
-
+        
         // Compute the Euclidean distance between the first and last waypoints
         double dx = last_wp.x - first_wp.x;
         double dy = last_wp.y - first_wp.y;
         double distance = std::sqrt(dx * dx + dy * dy);
-
-        // Compute the absolute difference in yaw
         double yaw_difference = std::abs(last_wp.yaw - first_wp.yaw);
 
         // If the distance is less than 1.0 and yaw difference is less than or equal to 0.1, ignore the request
@@ -534,20 +567,50 @@ void ServerNode::publish_fleet_state()
         //     rmf_frame_rs.location.y,
         //     rmf_frame_rs.location.yaw);
 
+        // ------------------------------------------------------------------
+        // battery‑watch → if below threshold, dispatch “station→charger” task
+        if (rmf_frame_rs.battery_percent < kLowBatteryThreshold)
+        {
+            if (robots_needing_charge_.insert(rmf_frame_rs.name).second)
+            {
+                // we’ve just inserted ⇒ wasn’t already in the set ⇒ first time low
+                dispatch_charge_task(rmf_frame_rs.name);
+            }
+        }
+        else if (rmf_frame_rs.battery_percent > kChargeHysteresis)
+        {
+            // battery sufficiently recovered ⇒ allow future charge requests
+            robots_needing_charge_.erase(rmf_frame_rs.name);
+        }
+
         rmf_frame_rs.name = fleet_frame_rs.name;
         rmf_frame_rs.model = fleet_frame_rs.model;
-        rmf_frame_rs.task_id = fleet_frame_rs.task_id;
+        // if we just got a trivial path request, bump the task_id by 1
+        if (trivial_path_robots_.erase(fleet_frame_rs.name) > 0) {
+            // parse the old task_id, increment, and re-stringify
+            try {
+                auto prev = std::stoull(fleet_frame_rs.task_id);
+                rmf_frame_rs.task_id = std::to_string(prev + 1);
+            }
+            catch (const std::exception& e) {
+                RCLCPP_WARN(
+                get_logger(),
+                "Failed to parse task_id as integer: %s;",e.what());
+                return;
+            }
+        }
+        else {
+            rmf_frame_rs.task_id = fleet_frame_rs.task_id;
+        }
         rmf_frame_rs.mode = fleet_frame_rs.mode;
         rmf_frame_rs.battery_percent = fleet_frame_rs.battery_percent;
 
         rmf_frame_rs.path.clear();
         for (const auto& fleet_frame_path_loc : fleet_frame_rs.path)
         {
-        rmf_fleet_msgs::msg::Location rmf_frame_path_loc;
-
-        transform_fleet_to_rmf(fleet_frame_path_loc, rmf_frame_path_loc);
-
-        rmf_frame_rs.path.push_back(rmf_frame_path_loc);
+            rmf_fleet_msgs::msg::Location rmf_frame_path_loc;
+            transform_fleet_to_rmf(fleet_frame_path_loc, rmf_frame_path_loc);
+            rmf_frame_rs.path.push_back(rmf_frame_path_loc);
         }
 
         // Add to fleet state
@@ -556,7 +619,6 @@ void ServerNode::publish_fleet_state()
         // Publish individual robot state to /robot_states
         robot_state_pub->publish(rmf_frame_rs);
     }
-  
 //   fleet_state_pub->publish(fleet_state); // why we need to publish fleet_state??? TPODAvia
 }
 

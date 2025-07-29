@@ -24,6 +24,8 @@ module FreeFleetData
     float y;
     float yaw;
     string level_name;
+    boolean obey_approach_speed_limit;
+    double approach_speed_limit;
   };
   struct RobotState
   {

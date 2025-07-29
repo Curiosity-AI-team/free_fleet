@@ -32,6 +32,8 @@ struct Location
   float y;
   float yaw;
   std::string level_name;
+  bool obey_approach_speed_limit;
+  double approach_speed_limit;
 };
 
 } // namespace messages

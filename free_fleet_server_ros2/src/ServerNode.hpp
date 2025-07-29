@@ -42,6 +42,7 @@
 #include <free_fleet/Server.hpp>
 #include <free_fleet/messages/Location.hpp>
 #include <free_fleet/messages/RobotState.hpp>
+#include "rmf_task_msgs/msg/api_request.hpp"
 
 #include "ServerNodeConfig.hpp"
 
@@ -152,7 +153,8 @@ private:
       fleet_state_pub;
 
   rclcpp::Publisher<rmf_fleet_msgs::msg::RobotState>::SharedPtr robot_state_pub;
-  
+  rclcpp::Publisher<rmf_task_msgs::msg::ApiRequest>::SharedPtr api_pub_;
+
   void publish_fleet_state();
 
   // --------------------------------------------------------------------------
@@ -169,6 +171,15 @@ private:
       const ServerNodeConfig& config, const rclcpp::NodeOptions& options);
 
   void start(Fields fields);
+
+  std::unordered_set<std::string> trivial_path_robots_;
+
+  static constexpr double kLowBatteryThreshold  = 0.20;   // trigger @ 20 %
+  static constexpr double kChargeHysteresis     = 0.25;   // clear  @ 25 %
+  std::unordered_set<std::string> robots_needing_charge_;
+
+  std::atomic<uint64_t> charge_request_counter_{0};
+  void dispatch_charge_task(const std::string& robot_name);
 
 };
 

@@ -66,8 +66,7 @@ bool Server::ServerImpl::send_mode_request(
   return sent;
 }
 
-bool Server::ServerImpl::send_path_request(
-    const messages::PathRequest& _path_request)
+bool Server::ServerImpl::send_path_request(const messages::PathRequest& _path_request)
 {
   FreeFleetData_PathRequest* new_pr = FreeFleetData_PathRequest__alloc();
   convert(_path_request, *new_pr);
