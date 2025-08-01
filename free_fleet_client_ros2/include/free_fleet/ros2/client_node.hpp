@@ -51,9 +51,12 @@
 
 #include <free_fleet/Client.hpp>
 #include <free_fleet/messages/Location.hpp>
-#include "rtabmap_msgs/msg/odom_info.hpp"
 
+#include "diagnostic_msgs/msg/diagnostic_array.hpp"
+#include "sensor_msgs/msg/battery_state.hpp"
 #include "free_fleet/ros2/client_node_config.hpp"
+#include <opennav_docking_msgs/action/dock_robot.hpp>
+#include <opennav_docking_msgs/action/undock_robot.hpp>
 
 namespace free_fleet
 {
@@ -86,73 +89,6 @@ public:
         rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr docking_trigger_client;
     };
 
-    void print_config();
-
-    rclcpp::Subscription<rtabmap_msgs::msg::OdomInfo>::SharedPtr localization_sub_;
-
-private:
-    // --------------------------------------------------------------------------
-    // Battery handling
-
-    rclcpp::Subscription<sensor_msgs::msg::BatteryState>::SharedPtr    battery_percent_sub;
-    Mutex battery_state_mutex;
-    sensor_msgs::msg::BatteryState current_battery_state;
-    void battery_state_callback_fn(const sensor_msgs::msg::BatteryState::SharedPtr msg);
-    void localization_callback(const rtabmap_msgs::msg::OdomInfo::SharedPtr info);
-    void check_battery_and_handle_charging();
-    // --------------------------------------------------------------------------
-    // Robot pose handling
-
-    std::shared_ptr<tf2_ros::Buffer> tf2_buffer;
-    std::shared_ptr<tf2_ros::TransformListener> tf2_listener;
-    Mutex robot_pose_mutex;
-    geometry_msgs::msg::PoseStamped current_robot_pose;
-    geometry_msgs::msg::PoseStamped previous_robot_pose;
-
-    bool get_robot_pose();
-
-    // --------------------------------------------------------------------------
-    // Mode handling
-
-    // TODO: conditions to trigger emergency, however this is most likely for
-    // indicating emergency within the fleet and not in RMF
-    // TODO: figure out a better way to handle multiple triggered modes
-    std::atomic<bool> request_error;
-    std::atomic<bool> emergency;
-    std::atomic<bool> paused;
-
-    messages::RobotMode get_robot_mode();
-    bool read_mode_request();
-
-    // --------------------------------------------------------------------------
-    // Path request handling
-
-    bool read_path_request();
-
-    // --------------------------------------------------------------------------
-    // Destination request handling
-
-    bool read_destination_request();
-
-    // --------------------------------------------------------------------------
-    // Task request handling
-
-    bool read_task_request();
-
-    // --------------------------------------------------------------------------
-    // Task handling
-
-    bool is_valid_request(
-            const std::string& request_fleet_name,
-            const std::string& request_robot_name,
-            const std::string& request_task_id);
-
-    Mutex task_id_mutex;
-    std::string current_task_id;
-
-    NavigateToPose::Goal location_to_nav_goal(
-        const messages::Location& _location) const;
-
     struct Goal
     {
         std::string level_name;
@@ -163,37 +99,80 @@ private:
         rclcpp::Time goal_end_time;
     };
 
+    void print_config();
+    std::chrono::steady_clock::time_point _start = std::chrono::steady_clock::now();
+
+private:
+
+    std::shared_ptr<tf2_ros::Buffer> tf2_buffer;
+    std::shared_ptr<tf2_ros::TransformListener> tf2_listener;
+    std::shared_ptr<rclcpp::TimerBase> update_timer;
+    std::shared_ptr<rclcpp::TimerBase> publish_timer;
+    sensor_msgs::msg::BatteryState current_battery_state;
+    geometry_msgs::msg::PoseStamped current_robot_pose;
+    geometry_msgs::msg::PoseStamped previous_robot_pose;
+
+    std::atomic<bool> request_error;
+    std::atomic<bool> emergency;
+    std::atomic<bool> paused;
+    
+    std::string current_task_id;
+    std::string next_task_id_for_idle_;
+
+    
+    ClientNodeConfig client_node_config;
+    Fields fields;
+    bool   idle_requested_    = false;
+    double sim_battery_percentage_ = 1;
+    double low_bat_threshold_ = 0.20;
+    double recharge_soc_      = 1.00;
+    bool   going_to_charge_   = false;
+    bool   charger_active_    = false;
+    double battery_discharge_rate_{0.0001};
+    double battery_charge_rate_{0.01};
+    double dock_x_{5}, dock_y_{-5}, dock_radius_{2};
+    bool dock_server_available_{false}, undock_server_available_{false};
+    messages::RobotMode get_robot_mode();
+    bool read_mode_request();
+    bool get_robot_pose();
+    bool read_path_request();
+    bool read_destination_request();
+    bool read_task_request();
+    bool is_valid_request(const std::string& request_fleet_name, const std::string& request_robot_name, const std::string& request_task_id);
+    bool has_elapsed();
+    bool is_robot_near_dock();
+    
+    
+    std::mutex     mode_request_mutex;
     Mutex goal_path_mutex;
     std::deque<Goal> goal_path;
-
+    Mutex battery_state_mutex;
+    Mutex robot_pose_mutex;
+    Mutex task_id_mutex;
+    
+    
+    void battery_sim_tick();
     void read_requests();
     void handle_requests();
     void publish_robot_state();
-
-    // --------------------------------------------------------------------------
-    // publish and update functions and timers
-
-    std::shared_ptr<rclcpp::TimerBase> update_timer;
-    std::shared_ptr<rclcpp::TimerBase> publish_timer;
     void update_fn();
     void publish_fn();
-
-    // --------------------------------------------------------------------------
-    void set_goal_tolerances(double xy_tol, double yaw_tol, bool statful);
-
-    ClientNodeConfig client_node_config;
-    Fields fields;
-    std::mutex     mode_request_mutex;
-    bool           idle_requested_{false};
-    std::string    next_task_id_for_idle_;
     void start(Fields fields);
+    void set_goal_tolerances(double xy_tol, double yaw_tol, bool statful);
+    void battery_state_callback_fn(const sensor_msgs::msg::BatteryState::SharedPtr msg);
+    void check_battery_and_handle_charging();
+    void instability_callback(const diagnostic_msgs::msg::DiagnosticArray::SharedPtr info);
+    
+    NavigateToPose::Goal location_to_nav_goal(const messages::Location& _location) const;
+    rclcpp::Subscription<sensor_msgs::msg::BatteryState>::SharedPtr             battery_percent_sub;
+    rclcpp::Subscription<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr      instability_sub_;
+    rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr                battery_pub_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr                           docking_cli_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr                           undocking_cli_;
 
-    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr     recharge_cli_;
-    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr     dis_recharge_cli_;
-    double low_bat_threshold_ = 0.20;
-    double recharge_soc_      = 0.80;
-    bool   going_to_charge_  = false;
-    bool   charger_active_   = false;
+  rclcpp_action::Client<opennav_docking_msgs::action::DockRobot>::SharedPtr   dock_action_client_;
+  rclcpp_action::Client<opennav_docking_msgs::action::UndockRobot>::SharedPtr undock_action_client_;
+
 };
 
 } // namespace ros2

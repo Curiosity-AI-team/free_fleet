@@ -34,7 +34,8 @@ if (ament_cmake_FOUND)
     geometry_msgs
     rmf_fleet_msgs
     free_fleet
-    rtabmap_msgs
+    opennav_docking_msgs
+    diagnostic_msgs
     nlohmann_json
   )
   foreach(dep ${dependencies})

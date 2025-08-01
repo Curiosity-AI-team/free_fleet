@@ -34,6 +34,7 @@
 #include <nlohmann/json.hpp>
 using json = nlohmann::json;
 
+
 namespace free_fleet
 {
 namespace ros2
@@ -79,9 +80,7 @@ ClientNode::ClientNode(const rclcpp::NodeOptions & options)
     get_parameter("dds_domain", client_node_config.dds_domain);
     get_parameter("dds_mode_request_topic", client_node_config.dds_mode_request_topic);
     get_parameter("dds_path_request_topic", client_node_config.dds_path_request_topic);
-    get_parameter(
-        "dds_destination_request_topic",
-        client_node_config.dds_destination_request_topic);
+    get_parameter("dds_destination_request_topic", client_node_config.dds_destination_request_topic);
     get_parameter("wait_timeout", client_node_config.wait_timeout);
     get_parameter("update_frequency", client_node_config.update_frequency);
     get_parameter("publish_frequency", client_node_config.publish_frequency);
@@ -178,8 +177,30 @@ ClientNode::ClientNode(const rclcpp::NodeOptions & options)
         srv.listen("0.0.0.0", 8790);
     }).detach();
 
-    recharge_cli_    = this->create_client<std_srvs::srv::Trigger>("/recharge");
-    dis_recharge_cli_= this->create_client<std_srvs::srv::Trigger>("/dis_recharge");
+    docking_cli_    = this->create_client<std_srvs::srv::Trigger>("/recharge");
+    undocking_cli_  = this->create_client<std_srvs::srv::Trigger>("/dis_recharge");
+
+    dock_action_client_   = rclcpp_action::create_client<opennav_docking_msgs::action::DockRobot>(this,   "/dock_robot");
+    undock_action_client_ = rclcpp_action::create_client<opennav_docking_msgs::action::UndockRobot>(this, "/undock_robot");
+// try to connect, but only wait for e.g. 5 seconds
+constexpr auto CONNECT_TIMEOUT = std::chrono::seconds(5);
+
+bool dock_ready = dock_action_client_->wait_for_action_server(CONNECT_TIMEOUT);
+if (!dock_ready) {
+  RCLCPP_WARN(get_logger(),
+    "Dock action server not available after %ld seconds; docking will be skipped",
+    CONNECT_TIMEOUT.count());
+}
+bool undock_ready = undock_action_client_->wait_for_action_server(CONNECT_TIMEOUT);
+if (!undock_ready) {
+  RCLCPP_WARN(get_logger(),
+    "Undock action server not available after %ld seconds; undocking will be skipped",
+    CONNECT_TIMEOUT.count());
+}
+
+// store availability in member flags
+dock_server_available_   = dock_ready;
+undock_server_available_ = undock_ready;
 
 }
 
@@ -195,8 +216,8 @@ void ClientNode::start(Fields _fields)
         client_node_config.battery_state_topic, rclcpp::SensorDataQoS().keep_last(1),
         std::bind(&ClientNode::battery_state_callback_fn, this, std::placeholders::_1));
 
-    localization_sub_ = create_subscription<rtabmap_msgs::msg::OdomInfo>("rtabmap/odom_info", rclcpp::QoS(1).best_effort(),
-                                                std::bind(&ClientNode::localization_callback, this, std::placeholders::_1));
+    instability_sub_ = create_subscription<diagnostic_msgs::msg::DiagnosticArray>("/instability_diagnostics", rclcpp::QoS(1).best_effort(),
+                                                std::bind(&ClientNode::instability_callback, this, std::placeholders::_1));
 
     request_error = false;
     emergency = false;
@@ -209,6 +230,7 @@ void ClientNode::start(Fields _fields)
     RCLCPP_INFO(get_logger(), "starting publish timer.");
     std::chrono::duration<double> publish_period = std::chrono::duration<double>(1.0 / client_node_config.publish_frequency);
     publish_timer = create_wall_timer(publish_period, std::bind(&ClientNode::publish_fn, this));
+    battery_pub_ = create_publisher<sensor_msgs::msg::BatteryState>(client_node_config.battery_state_topic, rclcpp::SystemDefaultsQoS());
 }
 
 void ClientNode::print_config()
@@ -220,21 +242,34 @@ void ClientNode::battery_state_callback_fn(const sensor_msgs::msg::BatteryState:
 {
     WriteLock battery_state_lock(battery_state_mutex);
     current_battery_state = *_msg;
+    charger_active_ = (_msg->power_supply_status == sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_CHARGING);
 }
 
-void ClientNode::localization_callback(const rtabmap_msgs::msg::OdomInfo::SharedPtr info)
+void ClientNode::instability_callback(const diagnostic_msgs::msg::DiagnosticArray::SharedPtr info)
 {
-    if (info->lost) {
-        RCLCPP_ERROR(get_logger(),
-            "RTAB-Map reports localization lost! Triggering RMF error mode.");
-        // cancel any in-flight Nav2 goals so you don’t keep driving blind
-        fields.move_base_client->async_cancel_all_goals();
-        // flag RMF adapter into error
-        request_error = true;
-    }
-    else {
-        RCLCPP_INFO(get_logger(), "Localization regained.");
-        request_error = false;
+    for (const auto& status : info->status)
+    {
+        RCLCPP_INFO(get_logger(), "=== Diagnostic Status ===");
+        RCLCPP_INFO(get_logger(), "Level: %d", status.level);
+        RCLCPP_INFO(get_logger(), "Name: %s", status.name.c_str());
+        RCLCPP_INFO(get_logger(), "Message: %s", status.message.c_str());
+        RCLCPP_INFO(get_logger(), "Hardware ID: %s", status.hardware_id.c_str());
+
+        for (const auto& kv : status.values)
+        {
+            RCLCPP_INFO(get_logger(), "  - %s: %s", kv.key.c_str(), kv.value.c_str());
+        }
+
+        if (status.level != diagnostic_msgs::msg::DiagnosticStatus::OK)
+        {
+            RCLCPP_ERROR(get_logger(), "Reports localization lost! Triggering RMF error mode.");
+            request_error = true;
+        }
+        else
+        {
+            RCLCPP_INFO(get_logger(), "Localization regained.");
+            request_error = false;
+        }
     }
 }
 
@@ -318,8 +353,8 @@ void ClientNode::publish_robot_state()
         /// RMF expects battery to have a percentage in the range for 0-100.
         /// sensor_msgs/BatteryInfo on the other hand returns a value in
         /// the range of 0-1
-        // new_robot_state.battery_percent = 100 * current_battery_state.percentage;
-        new_robot_state.battery_percent = 20;
+        new_robot_state.battery_percent = 100 * current_battery_state.percentage;
+        // new_robot_state.battery_percent = 20;
     }
 
     {
@@ -424,13 +459,17 @@ nav2_msgs::action::NavigateToPose::Goal ClientNode::location_to_nav_goal(const m
     return goal;
 }
 
+bool ClientNode::has_elapsed()
+{
+  auto now = std::chrono::steady_clock::now();
+  auto elapsed = now - _start;                               
+  return elapsed >= std::chrono::seconds(60);
+}
+
 bool ClientNode::read_mode_request()
 {
     messages::ModeRequest mode_request;
-    if (fields.client->read_mode_request(mode_request) &&
-            is_valid_request(
-                    mode_request.fleet_name, mode_request.robot_name,
-                    mode_request.task_id))
+    if (fields.client->read_mode_request(mode_request) && is_valid_request(mode_request.fleet_name, mode_request.robot_name, mode_request.task_id))
     {
         if (mode_request.mode.mode == messages::RobotMode::MODE_PAUSED)
         {
@@ -462,20 +501,19 @@ bool ClientNode::read_mode_request()
         else if (mode_request.mode.mode == messages::RobotMode::MODE_DOCKING)
         {
             RCLCPP_INFO(get_logger(), "received a DOCKING command.");
-            if (fields.docking_trigger_client &&
-                fields.docking_trigger_client->service_is_ready())
+            if (fields.docking_trigger_client && fields.docking_trigger_client->service_is_ready())
             {
-                using ServiceResponseFuture =
-                    rclcpp::Client<std_srvs::srv::Trigger>::SharedFuture;
-                auto response_received_callback = [&](ServiceResponseFuture future) {
+                using ServiceResponseFuture = rclcpp::Client<std_srvs::srv::Trigger>::SharedFuture;
+                auto response_received_callback = [&](ServiceResponseFuture future) 
+                {
                     auto response = future.get();
                     if (!response->success)
                     {
-                        RCLCPP_ERROR(get_logger(), "Failed to trigger docking sequence, message: %s.",
-                            response->message.c_str());
+                        RCLCPP_ERROR(get_logger(), "Failed to trigger docking sequence, message: %s.", response->message.c_str());
                         request_error = true;
                     } else {
                         request_error = false;
+                        RCLCPP_ERROR(get_logger(), "Trigger docking sequence, message: %s.", response->message.c_str());
                     }
                 };
                 auto trigger_srv = std::make_shared<std_srvs::srv::Trigger::Request>();
@@ -646,46 +684,6 @@ void ClientNode::read_requests()
     }
 }
 
-
-void ClientNode::check_battery_and_handle_charging()
-{
-    double soc;
-    {
-        ReadLock bat_lock(battery_state_mutex);
-        soc = current_battery_state.percentage;  // 0.0–1.0
-    }
-
-    // 1) dispatch a 1‑round “station→charger” patrol when SOC ≤ threshold
-    if (!going_to_charge_ && soc <= low_bat_threshold_)
-    {
-        RCLCPP_WARN(get_logger(), "[%s] SOC=%.0f%% low → sending auto‑charge request", client_node_config.robot_name.c_str(), soc*100.0);
-        going_to_charge_ = true;
-    }
-
-    // 2) once we see the ROS battery_status flip to CHARGING, call /recharge
-    {
-        ReadLock bat_lock(battery_state_mutex);
-        if (going_to_charge_ && !charger_active_)
-        {
-            charger_active_ = true;
-            auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
-            recharge_cli_->async_send_request(req);
-            RCLCPP_INFO(get_logger(), "→ called /recharge (std_srvs::Trigger)");
-        }
-    }
-
-    // 3) when SOC climbs back above recharge_soc_, call /dis_recharge once
-    if (charger_active_ && soc >= recharge_soc_)
-    {
-        auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
-        dis_recharge_cli_->async_send_request(req);
-        RCLCPP_INFO(get_logger(), "→ called /dis_recharge (std_srvs::Trigger)");
-
-        charger_active_  = false;
-        going_to_charge_ = false;
-    }
-}
-
 void ClientNode::handle_requests()
 {
 
@@ -815,7 +813,7 @@ void ClientNode::handle_requests()
             if (goal_path.front().approach_speed_limit != 0.0) {
                 set_goal_tolerances(2.0, 2.05, false);   // 5 cm / 0.05 rad
             } else {
-                set_goal_tolerances(0.25, 0.25, true);   // default 25 cm / 0.25 rad
+                set_goal_tolerances(0.5, 0.5, true);   // default 5 cm / 0.5 rad
             }
             // ────────────────────────────────────────────────────────────────
             RCLCPP_INFO(get_logger(), "Sending next goal.");
@@ -826,12 +824,114 @@ void ClientNode::handle_requests()
     }
 }
 
+void ClientNode::check_battery_and_handle_charging()
+{
+    if (!dock_server_available_) {
+    // RCLCPP_ERROR(get_logger(), "Skipping auto-dock: no action server");
+    return;
+    }
+    double soc;
+    soc = current_battery_state.percentage;  // 0.0–1.0
+
+    // 1) dispatch a 1‑round “station→charger” patrol when SOC ≤ threshold
+    if (!going_to_charge_ && !charger_active_ && soc <= low_bat_threshold_ && is_robot_near_dock())
+    {
+        RCLCPP_WARN(get_logger(), "[%s] SOC=%.0f%% low → sending auto‑charge request", client_node_config.robot_name.c_str(), soc*100.0);
+        
+        // action go to dock
+        opennav_docking_msgs::action::DockRobot::Goal goal;
+        goal.use_dock_id = true;
+        goal.dock_id     = "home_dock";
+
+        auto opts = rclcpp_action::Client<opennav_docking_msgs::action::DockRobot>::SendGoalOptions();
+        opts.goal_response_callback = [this](auto future){
+            if (future.get()) {
+                RCLCPP_INFO(get_logger(), "Auto-dock goal accepted");
+                going_to_charge_ = true;
+            } else {
+                RCLCPP_ERROR(get_logger(), "Auto-dock goal rejected");
+            }
+        };
+        opts.result_callback = [this](const auto & result){
+            if (result.code != rclcpp_action::ResultCode::SUCCEEDED) {
+                RCLCPP_ERROR(get_logger(),
+                "Auto-dock failed (%d) → will retry on next cycle",
+                (int)result.code);
+                going_to_charge_ = false;
+            }
+            else charger_active_ = true;
+        };
+        dock_action_client_->async_send_goal(goal, opts);
+
+    }
+
+    // 3) when SOC climbs back above recharge_soc_, call /dis_recharge once
+    if (charger_active_ && soc >= recharge_soc_)
+    {
+        auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
+        // docking_cli_->async_send_request(req);
+        RCLCPP_INFO(get_logger(), "DISCHARGE MODE");
+
+        opennav_docking_msgs::action::UndockRobot::Goal goal;
+        auto opts = rclcpp_action::Client<opennav_docking_msgs::action::UndockRobot>::SendGoalOptions();
+        opts.goal_response_callback = [this](auto future){
+        if (future.get()) {
+            RCLCPP_INFO(get_logger(), "Auto-undock goal accepted");
+            charger_active_  = false;
+        } else {
+            RCLCPP_ERROR(get_logger(), "Auto-undock goal rejected");
+        }
+        };
+        opts.result_callback = [this](const auto & result){
+        if (result.code != rclcpp_action::ResultCode::SUCCEEDED) {
+            RCLCPP_ERROR(get_logger(),
+            "Auto-undock failed (%d) → will retry on next cycle",
+            (int)result.code);
+            going_to_charge_ = true;
+        } else {
+            going_to_charge_ = false;
+            charger_active_  = false;
+        }
+        };
+        undock_action_client_->async_send_goal(goal, opts);
+
+    }
+}
+
+
+bool ClientNode::is_robot_near_dock()
+{
+    ReadLock lock(robot_pose_mutex);
+    const double dx = current_robot_pose.pose.position.x - dock_x_;
+    const double dy = current_robot_pose.pose.position.y - dock_y_;
+    return std::hypot(dx, dy) <= dock_radius_;
+}
+
+void ClientNode::battery_sim_tick()
+{
+    if (charger_active_)
+        sim_battery_percentage_ = std::min(1.0, sim_battery_percentage_ + battery_charge_rate_);
+    else
+        sim_battery_percentage_ = std::max(0.0, sim_battery_percentage_ - battery_discharge_rate_);
+
+    sensor_msgs::msg::BatteryState msg;
+    msg.header.stamp = now();
+    msg.percentage   = sim_battery_percentage_;
+    msg.power_supply_status =
+        charger_active_
+        ? sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_CHARGING
+        : sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_DISCHARGING;
+
+    battery_pub_->publish(msg);
+}
+
 void ClientNode::update_fn()
 {
     get_robot_pose();
     read_requests();
     handle_requests();
     check_battery_and_handle_charging();
+    battery_sim_tick();
 }
 
 void ClientNode::publish_fn()

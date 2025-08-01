@@ -111,6 +111,76 @@ void ServerNode::setup_config()
     get_parameter("translation_y", server_node_config.translation_y);
     get_parameter("rotation", server_node_config.rotation);
     get_parameter("scale", server_node_config.scale);
+
+
+    // fetch a parameter "docks_json" which should be a JSON array like:
+    //   [
+    //     {"name":"station","x":1.0,"y":2.0,"z":0.0},
+    //     {"name":"dock2","x":4.0,"y":1.5,"z":0.0}
+    //   ]
+    std::string docks_json;
+    get_parameter("docks_json", docks_json);
+    docks_json = R"JSON(
+                        [{"name":"station","x":5.0,"y":-5.0,"z":0.0},
+                        {"name":"dock2","x":4.0,"y":1.5,"z":0.0}]
+                        )JSON";
+
+    try
+    {
+        auto j = nlohmann::json::parse(docks_json);
+        for (auto& d : j)
+        {
+            docks_.push_back({
+            d.at("name").get<std::string>(),
+            d.at("x").get<double>(),
+            d.at("y").get<double>(),
+            d.value("z", 0.0)  // default z = 0.0 if omitted
+            });
+        }
+        RCLCPP_INFO(get_logger(), "Loaded %zu docks", docks_.size());
+    }
+    catch (const std::exception& e)
+    {
+        RCLCPP_ERROR(get_logger(),
+            "Failed to parse docks_json parameter: %s", e.what());
+    }
+
+}
+
+
+// Euclidean in 3D
+double ServerNode::compute_distance(double rx, double ry, double rz, Dock& dock)
+{
+    const double dx = rx - dock.x;
+    const double dy = ry - dock.y;
+    const double dz = rz - dock.z;
+    return std::sqrt(dx*dx + dy*dy + dz*dz);
+}
+
+void ServerNode::check_and_dispatch(const std::string& robot_name,
+                        double rx, double ry, double rz)
+{
+    // find the "station" dock
+    auto it = std::find_if(docks_.begin(), docks_.end(),
+        [](auto& d){ return d.name == "station"; });
+    if (it == docks_.end())
+        return;  // no station defined
+
+    const double dist = compute_distance(rx, ry, rz, *it);
+    RCLCPP_WARN(get_logger(),
+    "Robot '%s' is %.2fm from dock '%s' → dispatching go_to_place",
+    robot_name.c_str(), dist, it->name.c_str());
+    if (dist > 5.0)
+    {
+
+        // fire off your CLI task
+        // NOTE: this will block the thread briefly; for production
+        // you may want to spin off a std::async or better integrate
+        std::string cmd = 
+        "ros2 run rmf_demos_tasks dispatch_go_to_place -p \"" +
+        it->name + "\"";
+        // std::system(cmd.c_str());
+    }
 }
 
 bool ServerNode::is_ready()
@@ -567,21 +637,8 @@ void ServerNode::publish_fleet_state()
         //     rmf_frame_rs.location.y,
         //     rmf_frame_rs.location.yaw);
 
-        // ------------------------------------------------------------------
-        // battery‑watch → if below threshold, dispatch “station→charger” task
-        if (rmf_frame_rs.battery_percent < kLowBatteryThreshold)
-        {
-            if (robots_needing_charge_.insert(rmf_frame_rs.name).second)
-            {
-                // we’ve just inserted ⇒ wasn’t already in the set ⇒ first time low
-                dispatch_charge_task(rmf_frame_rs.name);
-            }
-        }
-        else if (rmf_frame_rs.battery_percent > kChargeHysteresis)
-        {
-            // battery sufficiently recovered ⇒ allow future charge requests
-            robots_needing_charge_.erase(rmf_frame_rs.name);
-        }
+        // // ------------------------------------------------------------------
+        check_and_dispatch(rmf_frame_rs.name, fleet_frame_rs.location.x, fleet_frame_rs.location.y, /* use z if you care: */ fleet_frame_rs.name.empty()?0.0:0.0);
 
         rmf_frame_rs.name = fleet_frame_rs.name;
         rmf_frame_rs.model = fleet_frame_rs.model;

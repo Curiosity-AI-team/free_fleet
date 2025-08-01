@@ -74,6 +74,14 @@ public:
     Server::SharedPtr server;
   };
 
+    struct Dock
+    {
+        std::string name;
+        double x, y, z;
+    };
+
+    std::vector<Dock> docks_;
+
   void print_config();
 
 private:
@@ -180,7 +188,8 @@ private:
 
   std::atomic<uint64_t> charge_request_counter_{0};
   void dispatch_charge_task(const std::string& robot_name);
-
+    void check_and_dispatch(const std::string& robot_name, double rx, double ry, double rz);
+    double compute_distance(double rx, double ry, double rz, Dock& dock);
 };
 
 } // namespace ros2
