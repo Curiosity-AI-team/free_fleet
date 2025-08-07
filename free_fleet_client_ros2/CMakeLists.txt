@@ -25,6 +25,7 @@ if (ament_cmake_FOUND)
   set(dependencies
     rclcpp
     rclcpp_action
+    rclcpp_components
     tf2
     tf2_ros
     nav2_util

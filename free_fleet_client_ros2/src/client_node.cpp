@@ -45,6 +45,57 @@ ClientNode::ClientNode(const rclcpp::NodeOptions & options)
     /// Starting the free fleet client
     RCLCPP_INFO(get_logger(), "Greetings from %s", get_name());
 
+dock_param_client_ =
+  std::make_shared<rclcpp::SyncParametersClient>(this, "docking_server");
+if (!dock_param_client_->wait_for_service(std::chrono::seconds(5))) {
+  RCLCPP_WARN(get_logger(),
+    "Could not reach docking_server parameter service – using defaults");
+}
+
+// 1) Dump all parameters
+auto list_result = dock_param_client_->list_parameters({""}, 10);
+for (const auto & name : list_result.names) {
+  auto params = dock_param_client_->get_parameters({name});
+  for (const auto & p : params) {
+    RCLCPP_INFO(get_logger(),
+      "  param '%s' = %s",
+      p.get_name().c_str(),
+      p.value_to_string().c_str());
+  }
+}
+
+// 2) Fetch the 'docks' list once, with an empty default
+auto docks = dock_param_client_
+  ->get_parameter<std::vector<std::string>>("docks", {});
+
+if (docks.empty()) {
+  RCLCPP_WARN(get_logger(), "Parameter 'docks' not set or empty");
+} else {
+  RCLCPP_INFO(get_logger(), "Found %zu entries in 'docks':", docks.size());
+  for (const auto & id : docks) {
+    RCLCPP_INFO(get_logger(), "  • %s", id.c_str());
+  }
+
+  // 3) For each dock ID, fetch its .pose array and print first two coords
+  for (const auto & id : docks) {
+    auto p = dock_param_client_
+      ->get_parameter<std::vector<double>>(id + ".pose", {});
+    RCLCPP_INFO(get_logger(),
+      "%s.pose has %zu entries", id.c_str(), p.size());
+
+    if (p.size() >= 2) {
+      dock_x_ = p[0];
+      dock_y_ = p[1];
+      dock_radius_ = 3.0;
+
+      RCLCPP_INFO(get_logger(),
+        "Using dock '%s' at x=%.3f, y=%.3f",
+        id.c_str(), dock_x_, dock_y_);
+      break;
+    }
+  }
+}
+
     // parameter declarations
     declare_parameter("fleet_name", client_node_config.fleet_name);
     declare_parameter("robot_name", client_node_config.robot_name);

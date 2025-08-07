@@ -57,6 +57,7 @@
 #include "free_fleet/ros2/client_node_config.hpp"
 #include <opennav_docking_msgs/action/dock_robot.hpp>
 #include <opennav_docking_msgs/action/undock_robot.hpp>
+#include <rclcpp/parameter_client.hpp>
 
 namespace free_fleet
 {
@@ -128,9 +129,9 @@ private:
     double recharge_soc_      = 1.00;
     bool   going_to_charge_   = false;
     bool   charger_active_    = false;
-    double battery_discharge_rate_{0.0001};
+    double battery_discharge_rate_{0.001};
     double battery_charge_rate_{0.01};
-    double dock_x_{5}, dock_y_{-5}, dock_radius_{2};
+    double dock_x_{0}, dock_y_{0}, dock_radius_{3};
     bool dock_server_available_{false}, undock_server_available_{false};
     messages::RobotMode get_robot_mode();
     bool read_mode_request();
@@ -162,7 +163,8 @@ private:
     void battery_state_callback_fn(const sensor_msgs::msg::BatteryState::SharedPtr msg);
     void check_battery_and_handle_charging();
     void instability_callback(const diagnostic_msgs::msg::DiagnosticArray::SharedPtr info);
-    
+
+    std::shared_ptr<rclcpp::SyncParametersClient> dock_param_client_{nullptr};
     NavigateToPose::Goal location_to_nav_goal(const messages::Location& _location) const;
     rclcpp::Subscription<sensor_msgs::msg::BatteryState>::SharedPtr             battery_percent_sub;
     rclcpp::Subscription<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr      instability_sub_;

@@ -113,38 +113,43 @@ void ServerNode::setup_config()
     get_parameter("scale", server_node_config.scale);
 
 
-    // fetch a parameter "docks_json" which should be a JSON array like:
-    //   [
-    //     {"name":"station","x":1.0,"y":2.0,"z":0.0},
-    //     {"name":"dock2","x":4.0,"y":1.5,"z":0.0}
-    //   ]
-    std::string docks_json;
-    get_parameter("docks_json", docks_json);
-    docks_json = R"JSON(
-                        [{"name":"station","x":5.0,"y":-5.0,"z":0.0},
-                        {"name":"dock2","x":4.0,"y":1.5,"z":0.0}]
-                        )JSON";
+docks_.clear();   // keep state consistent on re-calls
 
-    try
-    {
-        auto j = nlohmann::json::parse(docks_json);
-        for (auto& d : j)
-        {
-            docks_.push_back({
-            d.at("name").get<std::string>(),
-            d.at("x").get<double>(),
-            d.at("y").get<double>(),
-            d.value("z", 0.0)  // default z = 0.0 if omitted
-            });
-        }
-        RCLCPP_INFO(get_logger(), "Loaded %zu docks", docks_.size());
-    }
-    catch (const std::exception& e)
-    {
-        RCLCPP_ERROR(get_logger(),
-            "Failed to parse docks_json parameter: %s", e.what());
-    }
+dock_param_client_ =
+  std::make_shared<rclcpp::SyncParametersClient>(this, "docking_server");
 
+if (!dock_param_client_->wait_for_service(std::chrono::seconds(5)))
+{
+  RCLCPP_WARN(
+    get_logger(),
+    "docking_server parameter service not available – no docks loaded");
+  return;               // leave docks_ empty; caller will re-try next cycle
+}
+
+// At this point we know the service is up, so RPCs are safe
+auto dock_ids =
+  dock_param_client_->get_parameter<std::vector<std::string>>("docks", {});
+
+RCLCPP_INFO(get_logger(), "Found %zu dock IDs", dock_ids.size());
+
+for (const auto & id : dock_ids)
+{
+  auto p = dock_param_client_->get_parameter<std::vector<double>>(id + ".pose", {});
+
+  if (p.size() < 2)
+  {
+    RCLCPP_ERROR(get_logger(),
+      "  %s.pose has only %zu elements – skipping", id.c_str(), p.size());
+    continue;
+  }
+
+  docks_.push_back({ id, p[0], p[1], p.size() >= 3 ? p[2] : 0.0 });
+  RCLCPP_INFO(get_logger(),
+    "  loaded dock %-12s (%.3f, %.3f, %.3f)",
+    id.c_str(), docks_.back().x, docks_.back().y, docks_.back().z);
+}
+
+RCLCPP_ERROR(get_logger(), "Total docks loaded: %zu", docks_.size());
 }
 
 
@@ -157,12 +162,13 @@ double ServerNode::compute_distance(double rx, double ry, double rz, Dock& dock)
     return std::sqrt(dx*dx + dy*dy + dz*dz);
 }
 
-void ServerNode::check_and_dispatch(const std::string& robot_name,
-                        double rx, double ry, double rz)
+void ServerNode::check_and_dispatch(const std::string& robot_name, double rx, double ry, double rz, const std::string& target_dock)
 {
     // find the "station" dock
-    auto it = std::find_if(docks_.begin(), docks_.end(),
-        [](auto& d){ return d.name == "station"; });
+  auto it = std::find_if(docks_.begin(), docks_.end(),
+                         [&target_dock](const Dock& d)
+                         { return d.name == target_dock; });
+
     if (it == docks_.end())
         return;  // no station defined
 
@@ -638,7 +644,14 @@ void ServerNode::publish_fleet_state()
         //     rmf_frame_rs.location.yaw);
 
         // // ------------------------------------------------------------------
-        check_and_dispatch(rmf_frame_rs.name, fleet_frame_rs.location.x, fleet_frame_rs.location.y, /* use z if you care: */ fleet_frame_rs.name.empty()?0.0:0.0);
+        for (const auto& dock : docks_)
+            {
+            check_and_dispatch(rmf_frame_rs.name,
+                                fleet_frame_rs.location.x,
+                                fleet_frame_rs.location.y,
+                                0.0,                 // rz, if you have it
+                                dock.name);          // <- real parameter name
+            }
 
         rmf_frame_rs.name = fleet_frame_rs.name;
         rmf_frame_rs.model = fleet_frame_rs.model;

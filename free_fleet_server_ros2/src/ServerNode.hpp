@@ -24,7 +24,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/node_options.hpp>
-
+#include <rclcpp/parameter_client.hpp>
 #include <rcl_interfaces/msg/parameter_event.hpp>
 
 #include <rmf_fleet_msgs/msg/location.hpp>
@@ -188,8 +188,9 @@ private:
 
   std::atomic<uint64_t> charge_request_counter_{0};
   void dispatch_charge_task(const std::string& robot_name);
-    void check_and_dispatch(const std::string& robot_name, double rx, double ry, double rz);
+    void check_and_dispatch(const std::string& robot_name, double rx, double ry, double rz, const std::string& dock_name);
     double compute_distance(double rx, double ry, double rz, Dock& dock);
+    rclcpp::SyncParametersClient::SharedPtr dock_param_client_;
 };
 
 } // namespace ros2
